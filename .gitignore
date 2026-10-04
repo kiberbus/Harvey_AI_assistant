@@ -1,0 +1,21 @@
+# Окружение Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Личные данные: распознанная речь, заметки, напоминания, временное состояние
+harvey.log*
+notes.txt
+reminders.json
+.duck_state.json
+
+# Скачанные модели (большие, скачиваются заново сами)
+piper/
+silero/
+latest_silero_models.yml
+wake/*.onnx
+wake/*.tflite
+
+# Ярлык с абсолютными путями этого компьютера
+*.lnk
