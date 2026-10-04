@@ -151,6 +151,72 @@ def paste_text(text: str) -> None:
         _set_clipboard_text(previous)
 
 
+VK_C, VK_SHIFT, VK_LEFT = 0x43, 0x10, 0x25
+if _user32:
+    _user32.GetClipboardSequenceNumber.restype = wintypes.DWORD
+
+
+def copy_selection(timeout: float = 0.6) -> str:
+    """Копирует выделенный текст активного окна (Ctrl+C) и возвращает прежний буфер обмена.
+    Ничего не выделено — пустая строка."""
+    previous = _get_clipboard_text()
+    seq = _user32.GetClipboardSequenceNumber()
+    _user32.keybd_event(VK_CONTROL, 0, 0, 0)
+    _user32.keybd_event(VK_C, 0, 0, 0)
+    _user32.keybd_event(VK_C, 0, KEYEVENTF_KEYUP, 0)
+    _user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+    deadline = time.time() + timeout
+    while _user32.GetClipboardSequenceNumber() == seq:       # буфер не изменился — копировать нечего
+        if time.time() > deadline:
+            return ""
+        time.sleep(0.02)
+    time.sleep(0.05)                     # приложение может класть данные в несколько форматов по очереди
+    text = _get_clipboard_text() or ""
+    if previous is not None:
+        _set_clipboard_text(previous)
+    return text
+
+
+def select_back(chars: int) -> None:
+    """Выделяет chars символов левее курсора (Shift+←) — так можно заменить только что записанный текст."""
+    _user32.keybd_event(VK_SHIFT, 0, 0, 0)
+    try:
+        for _ in range(chars):
+            _user32.keybd_event(VK_LEFT, 0, 0, 0)
+            _user32.keybd_event(VK_LEFT, 0, KEYEVENTF_KEYUP, 0)
+    finally:
+        _user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.05)
+
+
+DWMWA_EXTENDED_FRAME_BOUNDS = 9
+DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+_dwmapi = ctypes.WinDLL("dwmapi") if sys.platform == "win32" else None
+if _user32:
+    _user32.SetThreadDpiAwarenessContext.argtypes = (ctypes.c_void_p,)
+    _user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+    _dwmapi.DwmGetWindowAttribute.argtypes = (wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD)
+
+
+def foreground_rect() -> tuple[int, int, int, int] | None:
+    """Границы активного окна в настоящих пикселях экрана (как их видит снимок Pillow) или None."""
+    hwnd = _user32.GetForegroundWindow()
+    if not hwnd or _user32.IsIconic(hwnd):
+        return None
+    old = _user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+    try:
+        rect = wintypes.RECT()
+        if _dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS,
+                                         ctypes.byref(rect), ctypes.sizeof(rect)) != 0:
+            _user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    finally:
+        if old:
+            _user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(old))
+    if rect.right - rect.left < 200 or rect.bottom - rect.top < 150:
+        return None
+    return rect.left, rect.top, rect.right, rect.bottom
+
+
 def foreground_title() -> str:
     buf = ctypes.create_unicode_buffer(256)
     _user32.GetWindowTextW(_user32.GetForegroundWindow(), buf, 256)

@@ -437,6 +437,35 @@ def speak(text: str) -> None:
     _enqueue("text", text)
 
 
+# Граница, по которой отдаём кусок ответа в озвучку: конец предложения или перевод строки
+_SENTENCE_END_RE = re.compile(r"(?<=[.!?…])\s+|\n+")
+_STREAM_COMMA_AT = 120          # длинное предложение без точки режем по последней запятой
+
+
+def speak_stream(pieces) -> str:
+    """Озвучивает текст, который приходит кусками (ответ ИИ), по предложениям — не дожидаясь конца.
+    Возвращает всё сказанное."""
+    spoken: list[str] = []
+    buffer = ""
+
+    def say_part(part: str) -> None:
+        part = part.strip()
+        if part:
+            spoken.append(part)
+            speak(part)
+
+    for piece in pieces:
+        buffer += piece
+        *ready, buffer = _SENTENCE_END_RE.split(buffer)
+        for sentence in ready:
+            say_part(sentence)
+        if len(buffer) > _STREAM_COMMA_AT and "," in buffer:
+            head, buffer = buffer.rsplit(",", 1)
+            say_part(head + ",")
+    say_part(buffer)
+    return " ".join(spoken)
+
+
 def play_sound(name: str) -> None:
     """Короткий звук «готово» / «ошибка» / … — через ту же очередь, чтобы не перебивать речь."""
     sound = SOUNDS.get(name)

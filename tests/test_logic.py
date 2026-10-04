@@ -8,7 +8,7 @@ import pytest
 
 import harvey
 import phrases
-from core import commands, media, util
+from core import commands, media, speech, util
 
 ROOT = Path(harvey.__file__).resolve().parent
 I, F, R = util.INFO, util.FAIL, util.RAW
@@ -146,13 +146,12 @@ def test_dialog_end(text, ends):
     assert bool(util.DIALOG_END_RE.match(text)) is ends
 
 
-def test_llm_stream_sentence_split():
-    buffer, out = "", []
-    for piece in ["Столица Франции ", "— Париж. Это ", "красивый город! А ", "ещё там Лувр"]:
-        buffer += piece
-        *ready, buffer = commands._SENTENCE_END_RE.split(buffer)
-        out += ready
-    assert out == ["Столица Франции — Париж.", "Это красивый город!"] and buffer == "А ещё там Лувр"
+def test_llm_stream_sentence_split(monkeypatch):
+    said = []
+    monkeypatch.setattr(speech, "speak", said.append)
+    pieces = ["Столица Франции ", "— Париж. Это ", "красивый город! А ", "ещё там Лувр"]
+    assert speech.speak_stream(pieces) == "Столица Франции — Париж. Это красивый город! А ещё там Лувр"
+    assert said == ["Столица Франции — Париж.", "Это красивый город!", "А ещё там Лувр"]
 
 
 # ── чей это плеер: музыка / YouTube / видео ──

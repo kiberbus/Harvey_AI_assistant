@@ -69,6 +69,9 @@ def change_brightness(delta: int) -> str:
     return f"{'повысил' if delta > 0 else 'понизил'}{END} яркость до {new} процентов"
 
 
+last_dictation: dict = {}     # что и куда записано последним — для «перепиши вежливее» без выделения
+
+
 def dictate(text: str) -> str:
     """Записывает текст в активное окно. Если выбранный способ не сработал — пробует второй."""
     text = text.strip()
@@ -80,6 +83,8 @@ def dictate(text: str) -> str:
     for method in methods:
         try:
             method(text)
+            last_dictation.update(text=text.replace("\r", " ").replace("\n", " "),
+                                  hwnd=_user32.GetForegroundWindow(), at=time.time())
             return f"записал{END} текст"
         except Exception as e:
             error = e
@@ -230,6 +235,22 @@ def _protected() -> tuple[set[int], set[str]]:
     except Exception:
         pass
     return pids, exes
+
+
+def foreground_is_mine() -> bool:
+    """Активное окно — сама помощница или консоль, из которой она запущена (Ctrl+C там её остановит)."""
+    if psutil is None:
+        return False
+    pid = wintypes.DWORD()
+    _user32.GetWindowThreadProcessId(_user32.GetForegroundWindow(), ctypes.byref(pid))
+    skip_pids, ancestor_exes = _protected()
+    if pid.value in skip_pids:
+        return True
+    try:
+        exe = psutil.Process(pid.value).name().lower()
+    except Exception:
+        return False
+    return exe != "explorer.exe" and exe in ancestor_exes
 
 
 def _target_exes(query: str) -> set[str]:

@@ -63,6 +63,7 @@ from core.audio import (  # noqa: F401
 from core.speech import (  # noqa: F401
     play_sound,
     speak,
+    speak_stream,
     speak_sync,
     stop_speaking,
 )
@@ -113,12 +114,11 @@ from core.daily import (  # noqa: F401
 from core.tray import (  # noqa: F401
     restart_self,
 )
+from core import llm, smart
 
 
-_ADDRESS_RULE = (f'К пользователю обращайся "{HONORIFIC}".' if USE_HONORIFIC
-                 else "К пользователю обращайся на «вы», без обращений вроде «господин».")
 SYSTEM_PROMPT = f"""Ты — голосовой ассистент по имени {ASSISTANT_NAME}, управляющий компьютером с Windows 11.
-Выполняй просьбы пользователя ТОЛЬКО через инструменты. {_ADDRESS_RULE}
+Выполняй просьбы пользователя ТОЛЬКО через инструменты. {smart.ADDRESS_RULE}
 - Если нужно несколько действий — вызови все инструменты сразу.
 - YouTube-поиск: open_browser(site="youtube", query="...").
 - Громкость в процентах — set_volume, "громче/тише" — change_volume.
@@ -681,44 +681,6 @@ def parse_all(low: str) -> list[Callable[[], str]] | None:
 
 
 # ───────────────────────── АГЕНТ (OLLAMA) ─────────────────────────
-def _chat_kwargs(messages: list[dict]) -> dict:
-    return dict(
-        model=MODEL,
-        messages=messages,
-        tools=TOOLS,
-        options={"num_ctx": NUM_CTX, "temperature": 0, "num_predict": 120},
-        keep_alive=KEEP_ALIVE,
-    )
-
-
-def _chat(messages: list[dict]):
-    kwargs = _chat_kwargs(messages)
-    try:
-        return ollama.chat(think=False, **kwargs)
-    except (TypeError, ollama.ResponseError):
-        return ollama.chat(**kwargs)
-
-
-def _chat_stream(messages: list[dict]):
-    """Потоковый ответ модели. Ошибка «think не поддерживается» вылезает при первом чанке —
-    тогда повторяем без think (только если ещё ничего не успели получить)."""
-    kwargs = _chat_kwargs(messages)
-    started = False
-    try:
-        for chunk in ollama.chat(think=False, stream=True, **kwargs):
-            started = True
-            yield chunk
-    except (TypeError, ollama.ResponseError):
-        if started:
-            raise
-        yield from ollama.chat(stream=True, **kwargs)
-
-
-# Граница, по которой отдаём кусок ответа в озвучку: конец предложения или перевод строки
-_SENTENCE_END_RE = re.compile(r"(?<=[.!?…])\s+|\n+")
-_STREAM_COMMA_AT = 120          # длинное предложение без точки режем по последней запятой
-
-
 def _run_tools(tool_calls, user_text: str) -> None:
     phrases: list[str] = []
     seen: set[str] = set()
@@ -745,7 +707,7 @@ def run_llm(user_text: str) -> None:
     not_understood = f"{FAIL}не понял{END} команду"
 
     if not LLM_STREAM:
-        msg = _chat(messages).message
+        msg = llm.chat(messages, tools=TOOLS).message
         if msg.tool_calls:
             _run_tools(msg.tool_calls, user_text)
         elif (msg.content or "").strip():
@@ -755,37 +717,23 @@ def run_llm(user_text: str) -> None:
         return
 
     tool_calls: list = []
-    buffer = ""
-    spoken: list[str] = []
 
-    def say_part(part: str) -> None:
-        part = part.strip()
-        if part:
-            spoken.append(part)
-            speak(part)
+    def texts():
+        for chunk in llm.chat_stream(messages, tools=TOOLS):
+            msg = chunk.message
+            if msg.tool_calls:
+                tool_calls.extend(msg.tool_calls)
+            if not tool_calls and msg.content:
+                yield msg.content
 
-    for chunk in _chat_stream(messages):
-        msg = chunk.message
-        if msg.tool_calls:
-            tool_calls.extend(msg.tool_calls)
-        if tool_calls or not msg.content:
-            continue
-        buffer += msg.content
-        *ready, buffer = _SENTENCE_END_RE.split(buffer)
-        for sentence in ready:
-            say_part(sentence)
-        if len(buffer) > _STREAM_COMMA_AT and "," in buffer:
-            head, buffer = buffer.rsplit(",", 1)
-            say_part(head + ",")
-
+    spoken = speak_stream(texts())
     if tool_calls:
         _run_tools(tool_calls, user_text)
         return
-    say_part(buffer)
     if not spoken:
         _reply([not_understood], user_text)
         return
-    _last_reply = " ".join(spoken)
+    _last_reply = spoken
     _remember(user_text, _last_reply)
 
 
@@ -857,6 +805,8 @@ def dialog_accepts(command: str) -> bool:
         return False
     if DICTATE_RE.match(stripped) or any(p.match(stripped) for p in NOTE_ADD_RE) or REPEAT_RE.match(low):
         return True
+    if smart.parse(low) is not None:              # вопрос, «переведи выделенное», «что на экране»
+        return True
     return not DIALOG_LOCAL_ONLY or parse_all(low) is not None
 
 
@@ -876,7 +826,7 @@ def handle_command(command: str) -> bool:
             return True
     m = DICTATE_RE.match(stripped)
     if m:
-        _reply([execute_tool_dictate(m.group(1))], low)
+        _reply([execute_tool_dictate(smart.prepare_dictation(m.group(1)))], low)
         return True
 
     if R["exit"].search(low):
@@ -898,6 +848,13 @@ def handle_command(command: str) -> bool:
         _reply([a() for a in actions], low)
         return True
 
+    # Вопросы, выделенный текст, «что на экране» — к ИИ без инструментов
+    smart_action = smart.parse(low)
+    if smart_action:
+        log("ИИ: текст", low)
+        run_smart(smart_action, low)
+        return True
+
     # Всё остальное — в Ollama (в лог попадает, чтобы потом добавить фразу в phrases.py)
     log("К ИИ", low)
     if not QUIET_MODE:
@@ -908,6 +865,20 @@ def handle_command(command: str) -> bool:
         log("Ошибка", str(e))
         _reply([f"{FAIL}произошла ошибка"])
     return True
+
+
+def run_smart(action: Callable[[list[dict]], smart.Result], low: str) -> None:
+    global _last_reply
+    try:
+        phrase, said = action(_history_messages())
+    except Exception as e:
+        log("Ошибка", f"ИИ: {e}")
+        phrase, said = f"{FAIL}произошла ошибка", ""
+    if phrase is not None:
+        _reply([phrase], low)
+    else:                                         # ответ уже прозвучал по ходу генерации
+        _last_reply = said
+        _remember(low, said)
 
 
 def execute_tool_dictate(text: str) -> str:
