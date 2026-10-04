@@ -138,7 +138,7 @@ def clear_pending() -> None:
 
 def sleep_mode() -> str:
     set_sleeping(True)
-    return f"{INFO}перехожу в режим сна, чтобы разбудить, скажите: {ASSISTANT_NAME}, проснись"
+    return f"{RAW}Хорошо."             # RAW — ровно эта фраза, в любом режиме (будить: «Харви, проснись»)
 
 
 _POWER_LABELS = {

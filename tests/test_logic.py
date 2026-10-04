@@ -255,3 +255,13 @@ def test_record_utterance_returns_early():
         q2.put(block)
     stt.record_utterance(q2, deque(), loud.flatten(), 0.05, lambda a: False)
     assert 38 - q2.qsize() == 8 + stt.SILENCE_BLOCKS                # команда не законченная — ждём как раньше
+
+
+def test_sleep_reply_is_just_ok():
+    from core import daily
+    try:
+        reply = daily.sleep_mode()
+        assert util.compose_quiet([reply]) == ("Хорошо.", None)      # тихий режим
+        assert util.compose([reply]) == "Хорошо."                      # обычный режим
+    finally:
+        daily.set_sleeping(False)
