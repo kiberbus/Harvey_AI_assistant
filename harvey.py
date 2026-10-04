@@ -121,6 +121,9 @@ SITE_PATTERNS = tuple((site, re.compile(p)) for site, p in SITE_ALIASES.items())
 SITE_MENTION_RE = re.compile(rf"\b(?:(?:на|в|во)\s+)?(?:{YT}|{GOOGLE}|интернет\w*)(?=\s|$)")
 # Короткие формы: «ютуб котики», «гугл погода в лондоне», «найди рецепт борща»
 SHORT_SEARCH_RE = re.compile(rf"^(?:(?:на|в|во)\s+)?(?P<site>{YT}|{GOOGLE})[\s,:—-]+(?P<query>.+)$")
+# «открой в браузере калькулятор матриц», «калькулятор матриц в браузере» — поиск в Google
+IN_BROWSER_RE = re.compile(r"^(?:(?:открой|найди|поищи|покажи|набери)\s+)?(?:(?:в|во)\s+(?:браузере|интернете)[\s,:—-]+"
+                           r"(?P<q1>.+)|(?P<q2>.+?)[\s,]+(?:в|во)\s+(?:браузере|интернете))$")
 BARE_SEARCH_RE = re.compile(r"^(?:найди|поищи)\s+(?:(?:в|во)\s+интернете?\s+)?(?P<query>.+)$")
 MEDIA_TARGET_RES = tuple((name, re.compile(p)) for name, p in MEDIA_TARGETS.items())
 MEDIA_VERB_RES = tuple((name, re.compile(p)) for name, p in MEDIA_VERBS.items())
@@ -2101,7 +2104,9 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if re.fullmatch(rf"(?:{OPEN_VERBS}\s+(?:мне\s+)?)?браузер", seg):
         return lambda: execute_tool("open_browser", {})
 
-    # Короткие формы без глагола: «ютуб», «яндекс музыка», «телеграм»
+    # Короткие формы без глагола: «музыка», «ютуб», «яндекс музыка», «телеграм»
+    if re.fullmatch(r"музык[аиу]|музычку|песню|песенку", seg):
+        return lambda: execute_tool("media", {"action": "play", "target": "music"})
     for site, pattern in SITE_PATTERNS:
         if pattern.fullmatch(seg):
             return lambda s=site: execute_tool("open_browser", {"site": s})
@@ -2288,6 +2293,11 @@ def parse_search(low: str) -> Callable[[], str] | None:
     короткие формы: «ютуб котики», «гугл погода в лондоне», «найди рецепт борща»."""
     site = detect_site(low)
     if site is None:
+        m = IN_BROWSER_RE.match(low)
+        if m:
+            query = (m.group("q1") or m.group("q2") or "").strip(PUNCT)
+            if query and query not in ("открой", "найди", "поищи"):
+                return lambda: execute_tool("open_browser", {"site": "google", "query": query})
         m = BARE_SEARCH_RE.match(low)                 # «найди X» без сайта — ищем в Google
         if m and m.group("query").strip(PUNCT):
             query = m.group("query").strip(PUNCT)
@@ -3122,6 +3132,15 @@ def _tray_image(sleeping: bool, speaking: bool):
     return image.resize((64, 64))
 
 
+def open_log_report() -> None:
+    """Отчёт по логу (log_report.py): что ушло в ИИ и что не получилось — открывается в Блокноте."""
+    from log_report import build_report
+
+    path = BASE_DIR / "отчёт по логу.txt"
+    path.write_text(build_report(), encoding="utf-8")
+    os.startfile(str(path))
+
+
 def start_tray() -> None:
     """Значок у часов: состояние, спать / проснуться, заметки, лог, автозапуск, выход."""
     if not TRAY_ENABLED:
@@ -3160,6 +3179,7 @@ def start_tray() -> None:
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Заметки", lambda _i, _t: open_notes()),
         pystray.MenuItem("Лог", lambda _i, _t: os.startfile(str(LOG_FILE)), visible=lambda _i: LOG_ENABLED),
+        pystray.MenuItem("Отчёт: что Харви не поняла", lambda _i, _t: open_log_report(), visible=lambda _i: LOG_ENABLED),
         pystray.MenuItem("Запускать вместе с Windows", toggle_autostart, checked=lambda _i: autostart_enabled()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Перезапустить (применить изменения)", lambda _i, _t: restart_self()),
