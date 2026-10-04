@@ -34,6 +34,8 @@ def route(text: str):
     ("переведи выделенное", "selection:translate"),
     ("переведи на английский", "selection:translate"),
     ("переведи это на немецкий", "selection:translate"),
+    ("переведи на английский и вставь", "selection:translate"),
+    ("переведи на английский и ставь текст", "selection:translate"),     # так Whisper слышит «вставь»
     ("перескажи выделенное", "selection:summary"),
     ("исправь ошибки в выделенном", "selection:fix"),
     ("исправь ошибки", "selection:fix"),
@@ -45,6 +47,10 @@ def route(text: str):
     ("что тут написано", "screen"),
     ("что это за ошибка", "screen"),
     ("что на экране", "screen"),
+    ("что видишь на экране", "screen"),
+    ("что видишь", "screen"),
+    ("что ты видишь", "screen"),
+    ("что у меня на экране", "screen"),
     ("посмотри на экран и скажи как исправить", "screen"),
     # ── не наше ──
     ("что думаешь о жизни", None),
@@ -111,6 +117,29 @@ def test_dictation_style(monkeypatch):
     monkeypatch.setattr(smart, "edit", fake_edit)
     assert smart.prepare_dictation("вежливо, скажи что я опоздаю") == "Уважаемый коллега, я задержусь."
     assert "вежливее" in seen["instruction"] and seen["text"] == "скажи что я опоздаю"
+
+
+def test_dictation_style_after_period(monkeypatch):
+    """Whisper пишет «запиши вежливо. Привет…» — слово «вежливо» не должно попасть в текст."""
+    seen = {}
+    monkeypatch.setattr(smart, "edit", lambda instruction, text: seen.update(instruction=instruction, text=text)
+                        or "Здравствуйте! Как ваши дела?")
+    assert smart.prepare_dictation("вежливо. Привет, как твои дела?") == "Здравствуйте! Как ваши дела?"
+    assert "вежливее" in seen["instruction"] and seen["text"] == "Привет, как твои дела?"
+
+
+def test_translation_replaces_selection(monkeypatch):
+    """Перевод встаёт вместо выделенного и вслух не читается."""
+    pasted, spoken = [], []
+    monkeypatch.setattr(smart, "foreground_is_mine", lambda: False)
+    monkeypatch.setattr(smart, "copy_selection", lambda: "Привет, мир")
+    monkeypatch.setattr(smart, "edit", lambda instruction, text: "Hello, world")
+    monkeypatch.setattr(smart, "paste_text", pasted.append)
+    monkeypatch.setattr(smart, "speak_stream", lambda pieces: spoken.append(list(pieces)) or "")
+    monkeypatch.setattr(smart._user32, "GetForegroundWindow", lambda: 1, raising=False)
+    phrase, _ = smart.on_selection("translate", "переведи на английский", None)
+    assert pasted == ["Hello, world"] and not spoken
+    assert not phrase.startswith((smart.INFO, smart.FAIL))        # тихий режим: только звук «готово»
 
 
 def test_dictation_model_down(monkeypatch):

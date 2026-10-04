@@ -32,7 +32,6 @@ from core.speech import (  # noqa: F401
     speak_stream,
 )
 from core.winapi import (  # noqa: F401
-    _set_clipboard_text,
     _user32,
     copy_selection,
     foreground_rect,
@@ -49,8 +48,9 @@ ANSWER_PROMPT = f"""Ты — голосовой ассистент по имен
 Отвечай по-русски одним-двумя короткими предложениями, без списков, разметки, ссылок и эмодзи. {ADDRESS_RULE}
 Если просят перевести — назови только перевод."""
 SCREEN_PROMPT = ANSWER_PROMPT + """
-К вопросу приложен снимок экрана пользователя. Отвечай по нему. Если на нём ошибка — коротко скажи,
-в чём она и как её исправить. Если просят прочитать текст — перескажи главное."""
+К вопросу приложен снимок экрана пользователя — это то, что ты сейчас видишь. Никогда не говори, что не видишь
+экран: отвечай по снимку. Если на нём ошибка — коротко скажи, в чём она и как её исправить.
+Если просят прочитать текст — перескажи главное."""
 EDIT_PROMPT = """Ты — редактор текста. Верни ТОЛЬКО итоговый текст: без кавычек, пояснений, заголовков и разметки.
 Сохраняй язык оригинала (если не просят перевести), переносы строк и смысл."""
 
@@ -65,13 +65,13 @@ SELECTION_THIS_RE = re.compile(SELECTION_THIS)
 SELECTION_ACTION_RES = tuple((name, re.compile(p)) for name, p in SELECTION_ACTIONS.items())
 STYLE_RES = tuple((re.compile(rf"\b(?:{p})"), instruction) for p, instruction in REWRITE_STYLES.items())
 LANG_RES = tuple((re.compile(rf"\b(?:{p})"), lang) for p, lang in TRANSLATE_LANGS.items())
-REPLACE_RE = re.compile(r"\b(?:вставь|замени)\b")
-# Слова, которые остаются от «переведи на английский», «исправь ошибки», если текста в команде нет
+# Слова, которые остаются от «переведи на английский и вставь», «исправь ошибки», если текста в команде нет
+# («ставь» — так Whisper часто слышит «вставь»)
 _BARE_FILLER_RE = re.compile(
     r"\b(?:на|в|во|по|мне|пожалуйста|язык\w*|стил\w*|текст\w*|ошибк\w*|орфографи\w*|грамматик\w*|"
-    r"пунктуаци\w*|и|вставь|замени|его|её|ее|кратко|коротко)\b")
-# «запиши вежливо: …», «запиши в деловом стиле …» — стиль в начале диктовки
-_DICTATE_STYLE_RE = re.compile(rf"^(?:в\s+)?(?:{'|'.join(REWRITE_STYLES)})(?:\s+стил\w*)?[\s,:—-]+(?P<text>.+)$",
+    r"пунктуаци\w*|и|а|(?:в|по)?став\w*|замени\w*|его|её|ее|это|кратко|коротко|сюда|туда|сразу)\b")
+# «запиши вежливо: …», «запиши вежливо. …» — стиль в начале диктовки (Whisper ставит после него точку)
+_DICTATE_STYLE_RE = re.compile(rf"^(?:в\s+)?(?:{'|'.join(REWRITE_STYLES)})(?:\s+стил\w*)?[\s,.!:;—–-]+(?P<text>.+)$",
                                re.IGNORECASE | re.DOTALL)
 
 
@@ -216,14 +216,15 @@ def _replace_selection(text: str) -> None:
 
 
 def on_selection(action: str, low: str, style: str | None) -> Result:
-    """Ctrl+C → ИИ → ответ вслух (объяснение, пересказ, перевод) или текст вместо выделенного."""
+    """Ctrl+C → ИИ → ответ вслух (объяснение, пересказ) или новый текст вместо выделенного
+    (перевод, исправление, переписывание — их вслух не читаем)."""
     if foreground_is_mine():
         return f"{FAIL}сначала переключитесь на окно с текстом", ""
     text = copy_selection().strip()
-    if not text and action in ("fix", "rewrite"):
+    if not text and action in ("translate", "fix", "rewrite"):
         text = _select_last_dictation()
     if not text:
-        if action != "rewrite" and action != "fix" and VISION_ENABLED:
+        if action in ("explain", "summary") and VISION_ENABLED:
             return ask_screen(low)                   # «объясни это» без выделения — смотрим на экран
         return f"{FAIL}сначала выделите текст", ""
     if len(text) > SELECTION_MAX_CHARS:
@@ -238,33 +239,23 @@ def on_selection(action: str, low: str, style: str | None) -> Result:
                     {"role": "user", "content": f"{instruction}\n\nТекст:\n{text}"}]
         return _speak_answer(messages, num_ctx=num_ctx)
 
+    # translate / fix / rewrite — новый текст встаёт на место выделенного (в тихом режиме — только звук «готово»)
     if action == "translate":
         lang = _target_lang(low, text)
-        if REPLACE_RE.search(low):
-            result = edit(f"Переведи текст на {lang} язык.", text)
-            if not result:
-                return f"{FAIL}не получилось перевести", ""
-            _replace_selection(result)
-            return f"перевел{END} текст на {lang}", ""
-        messages = [{"role": "system", "content": EDIT_PROMPT},
-                    {"role": "user", "content": f"Переведи текст на {lang} язык.\n\nТекст:\n{text}"}]
-        said = speak_stream(_texts(messages, len(text) // 2 + 100, num_ctx))
-        if not said:
-            return f"{FAIL}не получилось перевести", ""
-        if TRANSLATE_TO_CLIPBOARD:
-            _set_clipboard_text(clean_output(said))
-        return None, said
-
-    # fix / rewrite — новый текст встаёт на место выделенного
-    instruction = FIX if action == "fix" else f"Перепиши текст {style or DEFAULT_STYLE}."
+        instruction, done, verb = f"Переведи текст на {lang} язык.", f"перевел{END} текст на {lang}", "перевести"
+    elif action == "fix":
+        instruction, done, verb = FIX, f"исправил{END} текст", "исправить"
+    else:
+        instruction, done, verb = f"Перепиши текст {style or DEFAULT_STYLE}.", f"переписал{END} текст", "переписать"
     result = edit(instruction, text)
     if not result:
-        return f"{FAIL}не получилось {'исправить' if action == 'fix' else 'переписать'} текст", ""
+        return f"{FAIL}не получилось {verb} текст", ""
     if result == text:
         return (f"{INFO}ошибок не {'нашла' if FEMALE_VOICE else 'нашёл'}" if action == "fix"
                 else f"{INFO}текст и так хорош"), ""
+    log("Замена", result if len(result) <= 200 else result[:200] + "…")
     _replace_selection(result)
-    return (f"исправил{END} текст" if action == "fix" else f"переписал{END} текст"), ""
+    return done, ""
 
 
 # ───────────────────────── УМНАЯ ЗАПИСЬ ─────────────────────────
