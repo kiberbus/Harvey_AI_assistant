@@ -7,7 +7,7 @@
 
 Как получить модель (бесплатно, ~1 час, ничего ставить не нужно):
 
-1. Откройте https://github.com/dscripka/openWakeWord и найдите раздел «Training New Models».
+1. Откройте https://github.com/dscrip ka/openWakeWord и найдите раздел «Training New Models».
    Там ссылка на Google Colab-ноутбук для обучения «без опыта» (automatic model training).
 2. В ноутбуке впишите фразу. Английское «Harvey» звучит почти как «Харви»:
        target_word = "harvey"

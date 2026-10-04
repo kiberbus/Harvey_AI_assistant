@@ -1,0 +1,413 @@
+"""Приложения, браузер, папки, окна, яркость, диктовка."""
+
+from __future__ import annotations
+
+import ctypes
+import difflib
+import json
+import os
+import re
+import subprocess
+import threading
+import time
+import urllib.parse
+from ctypes import wintypes
+from pathlib import Path
+
+from config import *      # noqa: F401,F403
+from phrases import *     # noqa: F401,F403
+from core.util import (  # noqa: F401
+    END,
+    FAIL,
+    INFO,
+    MEDIA_TARGET_RES,
+    OWN_PID,
+    _cap,
+    _clamp,
+    log,
+    psutil,
+)
+from core.winapi import (  # noqa: F401
+    KEYEVENTF_KEYUP,
+    SW_MAXIMIZE,
+    SW_MINIMIZE,
+    VK_D,
+    VK_LWIN,
+    VK_MENU,
+    VK_SNAPSHOT,
+    VK_TAB,
+    WM_CLOSE,
+    _find_procs,
+    _user32,
+    _windows_of,
+    bring_to_front,
+    foreground_title,
+    paste_text,
+    type_text,
+)
+from core.speech import (  # noqa: F401
+    play_sound,
+    speak,
+)
+
+
+def set_brightness(level: int) -> str:
+    import screen_brightness_control as sbc
+
+    level = _clamp(level)
+    sbc.set_brightness(level)
+    return f"установил{END} яркость на {level} процентов"
+
+
+def change_brightness(delta: int) -> str:
+    import screen_brightness_control as sbc
+
+    current = sbc.get_brightness()
+    current = current[0] if isinstance(current, list) else current
+    new = _clamp(current + int(float(delta)))
+    sbc.set_brightness(new)
+    return f"{'повысил' if delta > 0 else 'понизил'}{END} яркость до {new} процентов"
+
+
+def dictate(text: str) -> str:
+    """Записывает текст в активное окно. Если выбранный способ не сработал — пробует второй."""
+    text = text.strip()
+    text = text[:1].upper() + text[1:]
+    log("Запись", f"в окно «{foreground_title()}»: {text}")
+    time.sleep(0.15)
+    methods = [paste_text, type_text] if DICTATION_MODE == "paste" else [type_text, paste_text]
+    error: Exception | None = None
+    for method in methods:
+        try:
+            method(text)
+            return f"записал{END} текст"
+        except Exception as e:
+            error = e
+            log("Запись", f"{method.__name__} не сработал: {e}")
+    raise error  # type: ignore[misc]
+
+
+# ───────────────────────── ПОИСК ПРИЛОЖЕНИЙ ─────────────────────────
+_apps_cache: list[dict] | None = None
+
+
+def _load_start_apps() -> list[dict]:
+    global _apps_cache
+    if _apps_cache is not None:
+        return _apps_cache
+    cmd = [
+        "powershell", "-NoProfile", "-Command",
+        "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-StartApps | ConvertTo-Json -Compress",
+    ]
+    out = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    ).stdout.strip()
+    data = json.loads(out) if out else []
+    if isinstance(data, dict):
+        data = [data]
+    _apps_cache = [a for a in data if a.get("Name") and a.get("AppID")]
+    return _apps_cache
+
+
+def _candidates(query: str) -> set[str]:
+    q = query.strip().lower()
+    result = {q}
+    for group, _ in NAME_GROUPS:
+        if q in group:
+            result |= group
+    return result
+
+
+def find_app(query: str) -> dict | None:
+    apps = _load_start_apps()
+    names = {a["Name"].lower(): a for a in apps}
+    cands = _candidates(query)
+    for c in cands:
+        if c in names:
+            return names[c]
+    hits = [n for n in names if any(c in n for c in cands)]
+    if hits:
+        return names[min(hits, key=len)]
+    for c in cands:
+        close = difflib.get_close_matches(c, list(names), n=1, cutoff=0.75)
+        if close:
+            return names[close[0]]
+    return None
+
+
+# ───────────────────────── ИНСТРУМЕНТЫ: ПРИЛОЖЕНИЯ / БРАУЗЕР / ПАПКИ ─────────────────────────
+def default_browser_exe() -> str | None:
+    if BROWSER_EXE:
+        return BROWSER_EXE
+    try:
+        import winreg
+
+        key = r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as k:
+            prog_id = winreg.QueryValueEx(k, "ProgId")[0]
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog_id + r"\shell\open\command") as k:
+            command = winreg.QueryValueEx(k, "")[0]
+        m = re.match(r'\s*"([^"]+)"', command) or re.match(r"\s*(\S+)", command)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
+def open_app(name: str) -> str:
+    app = find_app(name)
+    if not app:
+        return f"{FAIL}приложение «{name}» не найдено"
+
+    # Уже запущено — не открываем второй раз, а разворачиваем и показываем окно
+    try:
+        state = bring_to_front(_target_exes(name))
+    except Exception as e:
+        log("Окно", f"не удалось развернуть: {e}")
+        state = None
+    if state == "restored":
+        return f"развернул{END} {app['Name']}"
+    if state == "shown":
+        return f"показал{END} {app['Name']}"
+
+    subprocess.Popen(["explorer.exe", "shell:AppsFolder\\" + app["AppID"]])
+    return f"открыл{END} {app['Name']}"
+
+
+def open_browser(site: str = "", query: str = "") -> str:
+    site = (site or "").strip().lower()
+    query = (query or "").strip()
+    url = None
+    if site:
+        if site not in SITES:
+            return f"{FAIL}не знаю сайт «{site}»"
+        url = SITES[site]
+        if site == "youtube" and query:
+            url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(query)
+        elif site == "google" and query:
+            url = "https://www.google.com/search?q=" + urllib.parse.quote(query)
+    elif query:
+        url = "https://www.google.com/search?q=" + urllib.parse.quote(query)
+
+    exe = default_browser_exe()
+    if not url and exe:
+        try:
+            state = bring_to_front({Path(exe).name.lower()})
+        except Exception:
+            state = None
+        if state:
+            return f"{'развернул' if state == 'restored' else 'показал'}{END} браузер"
+    if exe and os.path.exists(exe):
+        subprocess.Popen([exe, url] if url else [exe])
+    elif url:
+        import webbrowser
+
+        webbrowser.open(url)
+    else:
+        return f"{FAIL}не удалось определить браузер"
+
+    detail = f"{site} и нашёл{END} «{query}»" if (site and query) else (site or query or "браузер")
+    return f"открыл{END} {detail}"
+
+
+def open_folder(name: str) -> str:
+    path = FOLDERS.get((name or "").strip().lower())
+    if not path:
+        return f"{FAIL}не знаю папку «{name}»"
+    os.startfile(path)
+    return f"открыл{END} папку {name}"
+
+
+def _protected() -> tuple[set[int], set[str]]:
+    """PID и имена процессов, которые закрывать нельзя: сама помощница и окно, откуда она запущена."""
+    pids, exes = {OWN_PID}, set()
+    try:
+        me = psutil.Process(OWN_PID)
+        exes.add(me.name().lower())
+        for parent in me.parents():
+            pids.add(parent.pid)
+            exes.add(parent.name().lower())
+    except Exception:
+        pass
+    return pids, exes
+
+
+def _target_exes(query: str) -> set[str]:
+    q = query.strip().lower()
+    if q in ("браузер", "browser"):
+        exe = default_browser_exe()
+        return {Path(exe).name.lower()} if exe else set()
+    exes: set[str] = set()
+    for names, procs in NAME_GROUPS:
+        if q in names:
+            exes |= {p.lower() for p in procs}
+    if exes:
+        return exes
+
+    # Общий случай: сверяем имя из меню Пуск / сказанное слово с именами запущенных процессов
+    norm = lambda x: x.lower().replace(" ", "").removesuffix(".exe")
+    stems = {norm(q)}
+    app = find_app(q)
+    if app:
+        stems.add(norm(app["Name"]))
+    for p in psutil.process_iter(["name"]):
+        name = (p.info.get("name") or "").lower()
+        proc = norm(name)
+        if len(proc) >= 4 and any(len(st) >= 3 and (st in proc or proc in st) for st in stems):
+            exes.add(name)
+    return exes
+
+
+def _taskkill(pids: list[int], force: bool = False, wait: bool = True) -> None:
+    if not pids:
+        return
+    cmd = ["taskkill"]
+    for pid in pids:
+        cmd += ["/PID", str(pid)]
+    if force:
+        cmd.append("/F")
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if wait:
+        subprocess.run(cmd, capture_output=True, creationflags=flags)
+    else:                                   # запуск taskkill занимает ~0.1 с — не ждём его
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+
+
+CLOSE_QUICK_WAIT = 0.3     # столько ждём честного закрытия, прежде чем ответить «готово»
+CLOSE_GRACE = 1.5          # столько даём приложению закрыться самому, прежде чем завершить принудительно
+
+
+def _report_late_failure(text: str) -> None:
+    """Ошибка, выяснившаяся уже после ответа «готово» (закрытие доделывалось в фоне)."""
+    log("Ошибка", text)
+    if QUIET_MODE:
+        play_sound("error")
+        if SPEAK_ERRORS:
+            speak(_cap(text) + ".")
+    else:
+        speak(f"Простите, господин, {text}.")
+
+
+def _finish_close(alive: list, targets: set[str], label: str) -> None:
+    """Доделывает закрытие в фоне: Telegram, Discord и т.п. на просьбу закрыться уходят в трей."""
+    _, alive = psutil.wait_procs(alive, timeout=CLOSE_GRACE - CLOSE_QUICK_WAIT)
+    if not alive:
+        return
+    if targets & DOCUMENT_EXES:
+        _report_late_failure(f"«{label}» не закрылось, возможно, просит сохранить файл")
+        return
+    _taskkill([p.pid for p in alive], force=True)
+    _, alive = psutil.wait_procs(alive, timeout=1.0)
+    if alive:
+        _report_late_failure(f"«{label}» не удалось закрыть")
+
+
+def _close_exes(targets: set[str], label: str) -> str:
+    """Сначала вежливо просит окно закрыться, и только если не вышло — завершает принудительно.
+    Для редакторов и офиса принудительно не завершает, чтобы не потерять несохранённое.
+    Отвечает сразу; если приложение упирается, добивает его в фоне и сообщает только о неудаче."""
+    skip_pids, ancestor_exes = _protected()
+    if targets & (PROTECTED_EXES | ancestor_exes):
+        return f"{FAIL}«{label}» закрывать нельзя"
+    procs = _find_procs(targets, skip_pids)
+    if not procs:
+        return f"{FAIL}«{label}» не запущено"
+
+    _taskkill([p.pid for p in procs], wait=False)
+    _, alive = psutil.wait_procs(procs, timeout=CLOSE_QUICK_WAIT)    # возвращается, как только процессы вышли
+    if alive:
+        threading.Thread(target=_finish_close, args=(alive, targets, label), daemon=True).start()
+    return f"закрыл{END} {label}"
+
+
+def _app_exes(name: str) -> set[str]:
+    """Процессы приложения; «ютуб», «видео» — это браузер, «музыка» — музыкальный плеер."""
+    low = (name or "").strip().lower()
+    for target, rx in MEDIA_TARGET_RES:
+        if rx.fullmatch(low):
+            if target == "music":
+                running = {(p.info["name"] or "").lower() for p in psutil.process_iter(["name"])}
+                return {n for n in running if any(a in n for a in MUSIC_APPS)}
+            return _target_exes("браузер")
+    return _target_exes(low)
+
+
+def minimize_app(name: str) -> str:
+    """Свернуть окна приложения (НЕ закрывать)."""
+    if psutil is None:
+        raise RuntimeError("psutil не установлен")
+    pids = {p.pid for p in _find_procs(_app_exes(name), set())}
+    if not pids:
+        return f"{FAIL}«{name}» не запущено"
+    windows = [hwnd for hwnd, visible in _windows_of(pids) if visible and not _user32.IsIconic(hwnd)]
+    if not windows:
+        return f"{INFO}«{name}» уже свёрнуто"
+    for hwnd in windows:
+        _user32.ShowWindow(hwnd, SW_MINIMIZE)
+    return f"свернул{END} {name}"
+
+
+def close_app(name: str) -> str:
+    if psutil is None:
+        raise RuntimeError("psutil не установлен")
+    return _close_exes(_target_exes(name), name)
+
+
+def close_active(window_only: bool = False) -> str:
+    """Закрывает то, что сейчас на переднем плане: окно (WM_CLOSE) или приложение целиком."""
+    if psutil is None:
+        raise RuntimeError("psutil не установлен")
+    hwnd = _user32.GetForegroundWindow()
+    if not hwnd:
+        return f"{FAIL}нет активного окна"
+    pid = wintypes.DWORD()
+    _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    exe = psutil.Process(pid.value).name().lower()
+    skip_pids, ancestor_exes = _protected()
+    if exe in PROTECTED_EXES:
+        return f"{FAIL}активное окно — системное, его закрывать нельзя"
+    if pid.value in skip_pids or exe in ancestor_exes:
+        return f"{FAIL}это окно, из которого запущена я, закрывать нельзя"
+    title = foreground_title()
+    if window_only or exe == "applicationframehost.exe":    # у приложений из магазина PID общий
+        _user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+        return f"закрыл{END} окно «{title}»"
+    return _close_exes({exe}, title)
+
+
+def _chord(*vks: int) -> None:
+    for vk in vks:
+        _user32.keybd_event(vk, 0, 0, 0)
+    for vk in reversed(vks):
+        _user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+
+
+def window_state(action: str) -> str:
+    hwnd = _user32.GetForegroundWindow()
+    if not hwnd:
+        return f"{FAIL}нет активного окна"
+    if action == "minimize":
+        _user32.ShowWindow(hwnd, SW_MINIMIZE)
+        return f"свернул{END} окно"
+    _user32.ShowWindow(hwnd, SW_MAXIMIZE)
+    return f"развернул{END} окно на весь экран"
+
+
+def show_desktop() -> str:
+    _chord(VK_LWIN, VK_D)
+    return f"свернул{END} все окна"
+
+
+def alt_tab() -> str:
+    _chord(VK_MENU, VK_TAB)
+    return f"переключил{END} окно"
+
+
+def screenshot() -> str:
+    _chord(VK_LWIN, VK_SNAPSHOT)          # сохраняется в Изображения\Снимки экрана
+    return f"сделал{END} снимок экрана"
+
+
+def lock_pc() -> str:
+    subprocess.Popen(["rundll32.exe", "user32.dll,LockWorkStation"])
+    return f"заблокировал{END} компьютер"

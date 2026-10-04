@@ -8,14 +8,16 @@ import pytest
 
 import harvey
 import phrases
+from core import commands, media, util
 
 ROOT = Path(harvey.__file__).resolve().parent
-I, F, R = harvey.INFO, harvey.FAIL, harvey.RAW
+I, F, R = util.INFO, util.FAIL, util.RAW
+SOURCES = ["harvey.py", "phrases.py", "config.py"] + [f"core/{p.name}" for p in (ROOT / "core").glob("*.py")]
 
 
 # ── целостность: то, что уже ломалось ──
 
-@pytest.mark.parametrize("name", ["harvey.py", "phrases.py", "config.py"])
+@pytest.mark.parametrize("name", SOURCES)
 def test_no_control_chars_in_source(name):
     """Однажды «\\b» в регулярке превратился в невидимый символ Backspace — и фразы перестали работать."""
     data = (ROOT / name).read_bytes()
@@ -30,9 +32,9 @@ def test_all_phrase_patterns_compile():
 
 def test_tools_match_functions():
     """Каждый инструмент, который видит ИИ, существует; каждая функция вызывается."""
-    for tool in harvey.TOOLS:
-        assert tool["function"]["name"] in harvey.FUNCTIONS
-    for name, fn in harvey.FUNCTIONS.items():
+    for tool in commands.TOOLS:
+        assert tool["function"]["name"] in commands.FUNCTIONS
+    for name, fn in commands.FUNCTIONS.items():
         assert callable(fn), name
 
 
@@ -46,7 +48,7 @@ def test_tools_match_functions():
     ([R + "Вы уверены, господин?"], ("Вы уверены, господин?", None)),
 ])
 def test_compose_quiet(phrases_in, expected):
-    assert harvey.compose_quiet(phrases_in) == expected
+    assert util.compose_quiet(phrases_in) == expected
 
 
 @pytest.mark.parametrize("text,expected", [
@@ -56,13 +58,13 @@ def test_compose_quiet(phrases_in, expected):
     ("Простите, господин, произошла ошибка.", "Простите, произошла ошибка."),
 ])
 def test_address_without_honorific(monkeypatch, text, expected):
-    monkeypatch.setattr(harvey, "USE_HONORIFIC", False)
-    assert harvey.address(text) == expected
+    monkeypatch.setattr(util, "USE_HONORIFIC", False)
+    assert util.address(text) == expected
 
 
 def test_address_custom_honorific(monkeypatch):
-    monkeypatch.setattr(harvey, "HONORIFIC", "сэр")
-    assert harvey.address("Господин, да, господин.") == "Сэр, да, сэр."
+    monkeypatch.setattr(util, "HONORIFIC", "сэр")
+    assert util.address("Господин, да, господин.") == "Сэр, да, сэр."
 
 
 # ── числа ──
@@ -71,7 +73,7 @@ def test_address_custom_honorific(monkeypatch):
     ("громкость 50", 50), ("пятьдесят", 50), ("двадцать пять", 25), ("сто", 100), ("ничего", None),
 ])
 def test_parse_number(text, expected):
-    assert harvey.parse_number(text) == expected
+    assert util.parse_number(text) == expected
 
 
 @pytest.mark.parametrize("text,expected", [
@@ -80,19 +82,19 @@ def test_parse_number(text, expected):
     ("двадцать пять минут", "25 минут"),
 ])
 def test_numbers_to_digits(text, expected):
-    assert harvey._numbers_to_digits(text) == expected
+    assert commands._numbers_to_digits(text) == expected
 
 
 def test_tts_normalization():
-    assert harvey.normalize_for_tts("Открыла Claude") == "Открыла клод"
-    assert harvey.normalize_for_tts("21 минута") == "двадцать одна минута"
+    assert util.normalize_for_tts("Открыла Claude") == "Открыла клод"
+    assert util.normalize_for_tts("21 минута") == "двадцать одна минута"
 
 
 # ── напоминания ──
 
 def _reminder(calls, text):
     calls.clear()
-    action = harvey.parse_reminder(text)
+    action = commands.parse_reminder(text)
     assert action is not None, text
     action()
     (name, args), = calls
@@ -125,7 +127,7 @@ def test_reminder_in_minutes(calls):
 
 
 def test_reminder_without_time_asks_when(calls):
-    result = harvey.parse_reminder("напомни позвонить маме")()
+    result = commands.parse_reminder("напомни позвонить маме")()
     assert result.startswith(I) and "когда" in result and not calls
 
 
@@ -136,19 +138,19 @@ def test_reminder_without_time_asks_when(calls):
     ("ну мы вчера ходили в кино", False),
 ])
 def test_dialog_accepts(text, accepted):
-    assert harvey.dialog_accepts(text) is accepted
+    assert commands.dialog_accepts(text) is accepted
 
 
 @pytest.mark.parametrize("text,ends", [("всё спасибо", True), ("спасибо", True), ("пауза", False)])
 def test_dialog_end(text, ends):
-    assert bool(harvey.DIALOG_END_RE.match(text)) is ends
+    assert bool(util.DIALOG_END_RE.match(text)) is ends
 
 
 def test_llm_stream_sentence_split():
     buffer, out = "", []
     for piece in ["Столица Франции ", "— Париж. Это ", "красивый город! А ", "ещё там Лувр"]:
         buffer += piece
-        *ready, buffer = harvey._SENTENCE_END_RE.split(buffer)
+        *ready, buffer = commands._SENTENCE_END_RE.split(buffer)
         out += ready
     assert out == ["Столица Франции — Париж.", "Это красивый город!"] and buffer == "А ещё там Лувр"
 
@@ -159,11 +161,11 @@ FIREFOX = "308046B0AF4A39CB"
 
 
 def _kinds(monkeypatch, info, titles, browser_titles=None):
-    monkeypatch.setattr(harvey, "_kind_memory", {})
-    monkeypatch.setattr(harvey, "_window_titles",
+    monkeypatch.setattr(media, "_kind_memory", {})
+    monkeypatch.setattr(media, "_window_titles",
                         lambda browsers_only=False: (browser_titles if browser_titles is not None else titles)
                         if browsers_only else titles)
-    return harvey._session_kinds(info, titles)
+    return media._session_kinds(info, titles)
 
 
 def test_kinds_youtube_active_tab(monkeypatch):

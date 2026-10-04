@@ -7,10 +7,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import harvey  # noqa: E402
+import harvey  # noqa: E402,F401  — точка входа тоже должна импортироваться без ошибок
+from core import apps, commands, util  # noqa: E402
 
 # Список приложений из меню «Пуск» подменяем: тесты не должны зависеть от того, что установлено
-harvey._apps_cache = [
+apps._apps_cache = [
     {"Name": "Telegram", "AppID": "telegram"},
     {"Name": "Яндекс Музыка", "AppID": "ru.yandex.desktop.music"},
     {"Name": "Claude", "AppID": "Claude_pzs8sxrjxfjjc!Claude"},
@@ -27,7 +28,7 @@ def calls(monkeypatch):
         recorded.append((name, dict(args)))
         return "ok"
 
-    monkeypatch.setattr(harvey, "execute_tool", fake_execute)
+    monkeypatch.setattr(commands, "execute_tool", fake_execute)
     return recorded
 
 
@@ -37,7 +38,7 @@ def run(calls):
     None — фраза ушла бы в ИИ."""
     def _run(text: str):
         calls.clear()
-        actions = harvey.parse_all(text.lower().strip(harvey.PUNCT))
+        actions = commands.parse_all(text.lower().strip(util.PUNCT))
         if actions is None:
             return None
         results = [action() for action in actions]
