@@ -25,6 +25,7 @@ import os
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")   # до импорта torch и ctranslate2
 
+import faulthandler
 import numpy as np
 import os
 import queue
@@ -105,6 +106,7 @@ from core.commands import (  # noqa: F401
 )
 import core.daily as daily
 import core.stt as stt
+import core.system as system
 import core.tray as tray
 
 # ───────────────────────── ГЛАВНЫЙ ЦИКЛ ─────────────────────────
@@ -120,6 +122,10 @@ def main() -> None:
     except Exception:
         pass
     setup_logging()
+    try:      # падение в C-коде (ctypes, CUDA) не оставляет следов в логе — пусть хотя бы стек Python
+        faulthandler.enable(open(BASE_DIR / "crash.log", "a", encoding="utf-8"), all_threads=True)
+    except Exception:
+        pass
     if not _single_instance():
         log("Система", f"{ASSISTANT_NAME} уже запущен{'а' if FEMALE_VOICE else ''} — второй экземпляр не нужен.")
         return
@@ -139,6 +145,8 @@ def main() -> None:
 
     _wake.load()
     start_reminders()
+    if system.mic_muted():                   # проверяем здесь, в главном потоке: трей к микрофону не обращается
+        log("Система", "Микрофон выключен — включите его в меню значка у часов.")
     start_tray()
 
     log("Система", "Жду загрузки Whisper...")
@@ -174,6 +182,13 @@ def main() -> None:
                 if ducker.active and (not _speaking.is_set() or ducker.stale):
                     ducker.restore()
                 _chimes.close_if_idle()
+                if system.mic_on_requested.is_set():     # «Включить микрофон» в меню трея
+                    system.mic_on_requested.clear()
+                    try:
+                        log("Система", system.microphone(True))
+                        play_sound("ready")
+                    except Exception as e:
+                        log("Система", f"не удалось включить микрофон: {e}")
                 # Окно диалога отсчитываем с момента, когда Харви замолчала
                 if dialog_until:
                     if _speaking.is_set():

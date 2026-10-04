@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import os
 import subprocess
+import threading
 import time
 from ctypes import wintypes
 
@@ -156,11 +157,6 @@ def gpu_status() -> str:
 def _mic_volume():
     if not HAS_PYCAW:
         raise RuntimeError("pycaw не установлен")
-    try:                                    # меню трея работает в своём потоке — там COM ещё не запущен
-        import comtypes
-        comtypes.CoInitialize()
-    except Exception:
-        pass
     device = AudioUtilities.GetMicrophone()
     if device is None:
         raise RuntimeError("микрофон не найден")
@@ -168,17 +164,28 @@ def _mic_volume():
     return ctypes.cast(iface, ctypes.POINTER(IAudioEndpointVolume))
 
 
+# Состояние микрофона для меню трея. Сам трей к микрофону НЕ обращается: COM из его потока
+# (меню перестраивается при каждой смене «слушает/говорит») ронял весь процесс в _ctypes.
+mic_is_muted = False
+mic_on_requested = threading.Event()        # «Включить микрофон» в трее — включает главный цикл
+
+
 def mic_muted() -> bool:
+    """Спрашивает систему (только из главного потока) и запоминает ответ для трея."""
+    global mic_is_muted
     try:
-        return bool(_mic_volume().GetMute())
+        mic_is_muted = bool(_mic_volume().GetMute())
     except Exception:
-        return False
+        pass
+    return mic_is_muted
 
 
 def microphone(state: bool) -> str:
     """Включает (True) или выключает (False) микрофон по умолчанию — для всех программ сразу.
     Выключенный микрофон Харви тоже не слышит: включить обратно — из меню значка у часов."""
+    global mic_is_muted
     _mic_volume().SetMute(0 if state else 1, None)
+    mic_is_muted = not state
     if state:
         return f"включил{END} микрофон"
     return (f"{INFO}микрофон выключен. Теперь я вас тоже не слышу — "

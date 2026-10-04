@@ -116,11 +116,7 @@ def start_tray() -> None:
             log("Трей", f"не удалось изменить автозапуск: {e}")
 
     def mic_on(_icon, _item) -> None:             # «выключи микрофон» голосом не отменить — Харви не слышит
-        try:
-            log("Трей", system.microphone(True))
-            play_sound("ready")
-        except Exception as e:
-            log("Трей", f"не удалось включить микрофон: {e}")
+        system.mic_on_requested.set()             # включит главный цикл: COM из потока трея роняет процесс
 
     def quit_app(icon, _item) -> None:
         _quit_event.set()
@@ -130,7 +126,7 @@ def start_tray() -> None:
         pystray.MenuItem(status, None, enabled=False),
         pystray.MenuItem("Спать", go_sleep, visible=lambda _i: not daily._sleeping),
         pystray.MenuItem("Проснуться", wake, visible=lambda _i: daily._sleeping),
-        pystray.MenuItem("Включить микрофон", mic_on, visible=lambda _i: system.mic_muted()),
+        pystray.MenuItem("Включить микрофон", mic_on, visible=lambda _i: system.mic_is_muted),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Заметки", lambda _i, _t: open_notes()),
         pystray.MenuItem("Лог", lambda _i, _t: os.startfile(str(LOG_FILE)), visible=lambda _i: LOG_ENABLED),
