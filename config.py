@@ -141,6 +141,9 @@ SITES = {
     "youtube": "https://www.youtube.com",
     "google": "https://www.google.com",
     "github": "https://github.com",
+    "translate": "https://translate.google.com",
+    "colab": "https://colab.research.google.com",
+    "astanahub": "https://astanahub.com",
 }
 
 _HOME = os.path.expanduser("~")
@@ -157,7 +160,7 @@ FOLDERS = {
 NAME_GROUPS = [
     # (как приложение можно назвать голосом, имена его процессов — нужны для «закрой»)
     ({"telegram", "телеграм", "телеграмм", "тг"}, ("telegram.exe",)),
-    ({"claude", "cloud", "клод", "клода", "клоду", "клауд", "клауде", "клаут", "клоуд"}, ("claude.exe",)),
+    ({"claude", "cloud", "клод", "клода", "клоду", "клауд", "клауде", "клауды", "клаут", "клоуд"}, ("claude.exe",)),
     ({"яндекс музыка", "яндекс музыку", "яндекс музыке", "яндекс.музыка", "yandex music"}, ("яндекс музыка.exe",)),
     ({"notepad", "блокнот"}, ("notepad.exe",)),
     ({"calculator", "калькулятор"}, ("calculatorapp.exe", "calculator.exe")),
@@ -170,7 +173,7 @@ NAME_GROUPS = [
     ({"word", "ворд"}, ("winword.exe",)),
     ({"excel", "эксель"}, ("excel.exe",)),
     ({"paint", "пейнт"}, ("mspaint.exe", "paintstudio.view.exe")),
-    ({"task manager", "диспетчер задач"}, ("taskmgr.exe",)),
+    ({"task manager", "диспетчер задач", "диспетчер задачи", "диспетчер"}, ("taskmgr.exe",)),
     ({"terminal", "терминал", "windows terminal"}, ("windowsterminal.exe",)),
     ({"vscode", "visual studio code", "код", "вс код"}, ("code.exe",)),
     ({"obs", "obs studio", "обс"}, ("obs64.exe", "obs32.exe")),

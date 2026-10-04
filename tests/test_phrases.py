@@ -59,7 +59,7 @@ PHRASE_CASES = [
     ("браузер", [("open_browser", {})]),
     ("открой в браузере калькулятор матриц", [("open_browser", {"site": "google", "query": "калькулятор матриц"})]),
     ("открой калькулятор матриц в браузере", [("open_browser", {"site": "google", "query": "калькулятор матриц"})]),
-    ("в браузере astana hub", [("open_browser", {"site": "google", "query": "astana hub"})]),
+    ("в браузере astana hub", [("open_browser", {"site": "astanahub"})]),
     ("музыка", [(M, {"action": "play", "target": "music"})]),
     ("спим", [("sleep_mode", {})]),
 
@@ -91,6 +91,65 @@ PHRASE_CASES = [
     ("поставь таймер на 5 минут", [("set_timer", {"seconds": 300})]),
     ("какие напоминания", [("list_reminders", {})]),
     ("отмени все напоминания", [("cancel_reminders", {})]),
+
+    # ── из лога: ошибки слуха и непонятые формулировки ──
+    ("музыка, столб", [(M, {"action": "pause", "target": "music"})]),
+    ("просто открой браузер", [("open_browser", {})]),
+    ("открой browser", [("open_browser", {})]),
+    ("открой в браузере", [("open_browser", {})]),
+    ("открой, пожалуйста, claude", [("open_app", {"name": "claude"})]),
+    ("открой клауды", [("open_app", {"name": "клауды"})]),
+    ("открой станахаб", [("open_browser", {"site": "astanahub"})]),
+    ("переводчик", [("open_browser", {"site": "translate"})]),
+    ("браузер, переводчик", [("open_browser", {"site": "translate"})]),
+    ("открой в браузере google collab", [("open_browser", {"site": "colab"})]),
+    ("открой музыку", [("open_app", {"name": "яндекс музыка"})]),
+    ("диск д", [("open_drive", {"letter": "D"})]),
+    ("открой диск c", [("open_drive", {"letter": "C"})]),
+    ("перезапуск", [("restart_self", {})]),
+    ("открой telegram, а потом закрою его", [("open_app", {"name": "telegram"}), ("close_app", {"name": "telegram"})]),
+    ("доллар к тенге", [("calculate", {"text": "доллар к тенге"})]),
+    ("доллар, king'e", [("calculate", {"text": "доллар, в тенге"})]),
+    ("пет долларов тенге", [("calculate", {"text": "пять долларов тенге"})]),
+    ("видели текст", [("shortcut", {"action": "select_all"})]),
+
+    # ── редактирование ──
+    ("скопируй", [("shortcut", {"action": "copy"})]),
+    ("скопируй всё", [("shortcut", {"action": "copy_all"})]),
+    ("вставь", [("shortcut", {"action": "paste"})]),
+    ("отмени", [("shortcut", {"action": "undo"})]),
+    ("сохрани", [("shortcut", {"action": "save"})]),
+    ("выдели всё", [("shortcut", {"action": "select_all"})]),
+    ("очисти поле", [("shortcut", {"action": "clear_field"})]),
+    ("нажми enter", [("shortcut", {"action": "enter"})]),
+    ("нажми энтер", [("shortcut", {"action": "enter"})]),
+    ("отправь", [("shortcut", {"action": "enter"})]),
+
+    # ── браузер и окна ──
+    ("новая вкладка", [("shortcut", {"action": "new_tab"})]),
+    ("открой новую вкладку", [("shortcut", {"action": "new_tab"})]),
+    ("закрой вкладку", [("shortcut", {"action": "close_tab"})]),
+    ("следующая вкладка", [("shortcut", {"action": "next_tab"})]),
+    ("предыдущая вкладка", [("shortcut", {"action": "prev_tab"})]),
+    ("обнови страницу", [("shortcut", {"action": "refresh"})]),
+    ("вперёд", [("shortcut", {"action": "forward"})]),
+    ("полный экран", [("shortcut", {"action": "fullscreen"})]),
+    ("окно влево", [("shortcut", {"action": "window_left"})]),
+    ("перемести окно вправо", [("shortcut", {"action": "window_right"})]),
+
+    # ── система ──
+    ("загрузка процессора", [("system_status", {})]),
+    ("сколько свободно памяти", [("system_status", {})]),
+    ("температура видеокарты", [("gpu_status", {})]),
+    ("какая температура видеокарты", [("gpu_status", {})]),
+    ("выключи микрофон", [("microphone", {"state": False})]),
+    ("заглуши микрофон", [("microphone", {"state": False})]),
+    ("включи микрофон", [("microphone", {"state": True})]),
+
+    # ── то, что новые команды не должны перехватить ──
+    ("перезагрузи", [("request_power", {"action": "restart"})]),
+    ("какая погода", [("weather", {})]),
+    ("закрой телеграм", [("close_app", {"name": "телеграм"})]),
 ]
 
 
@@ -105,3 +164,14 @@ def test_phrase(run, phrase, expected):
 ])
 def test_goes_to_llm(run, phrase):
     assert run(phrase) is None
+
+
+@pytest.mark.parametrize("exe,expected", [
+    ("firefox.exe", [("shortcut", {"action": "back"})]),
+    ("telegram.exe", [("media", {"action": "previous"})]),
+])
+def test_back_depends_on_window(run, monkeypatch, exe, expected):
+    """«Назад» в браузере — страница назад, в остальных окнах — предыдущий трек."""
+    from core import system
+    monkeypatch.setattr(system, "foreground_exe", lambda: exe)
+    assert run("назад") == expected

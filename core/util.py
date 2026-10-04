@@ -84,6 +84,9 @@ REMIND_VERB_RE = re.compile(REMIND_VERB)
 REMIND_LIST_RE = re.compile("|".join(REMIND_LIST))
 REMIND_CANCEL_RE = re.compile("|".join(REMIND_CANCEL))
 APP_ALIASES = set().union(*(names for names, _ in NAME_GROUPS))   # «телеграм» без «открой»
+SHORTCUT_RES = tuple((action, _rx(patterns)) for action, patterns in SHORTCUTS.items())
+BACK_OR_PREVIOUS_RE = re.compile(BACK_OR_PREVIOUS)
+DRIVE_RE = re.compile(DRIVE)
 
 INFO = "~"                            # префикс «информационной» фразы: её произносим даже в кратком режиме
 RAW = "="                             # префикс фразы, которую говорим как есть, без «Слушаюсь, господин»

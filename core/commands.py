@@ -19,8 +19,10 @@ from core.util import (  # noqa: F401
     APP_VOLUME_DOWN_RE,
     APP_VOLUME_FILLER_RE,
     APP_VOLUME_UP_RE,
+    BACK_OR_PREVIOUS_RE,
     BARE_SEARCH_RE,
     COMPLEX_MARKERS,
+    DRIVE_RE,
     DICTATE_RE,
     END,
     FAIL,
@@ -40,6 +42,7 @@ from core.util import (  # noqa: F401
     REMIND_VERB_RE,
     REPEAT_RE,
     SEARCH_VERB_RE,
+    SHORTCUT_RES,
     SHORT_SEARCH_RE,
     SILENCE_RE,
     SITE_MENTION_RE,
@@ -114,7 +117,7 @@ from core.daily import (  # noqa: F401
 from core.tray import (  # noqa: F401
     restart_self,
 )
-from core import llm, smart
+from core import calc, llm, smart, system
 
 
 SYSTEM_PROMPT = f"""Ты — голосовой ассистент по имени {ASSISTANT_NAME}, управляющий компьютером с Windows 11.
@@ -170,6 +173,12 @@ FUNCTIONS: dict[str, Callable[..., str]] = {
     "cancel_reminders": cancel_reminders,
     "set_brightness": set_brightness,
     "change_brightness": change_brightness,
+    "shortcut": system.shortcut,
+    "open_drive": system.open_drive,
+    "system_status": system.system_status,
+    "gpu_status": system.gpu_status,
+    "microphone": system.microphone,
+    "calculate": calc.calculate,
 }
 
 
@@ -215,6 +224,13 @@ TOOLS = [
            "level": _PERCENT, "delta": _DELTA}, ["target"]),
     _tool("set_brightness", "Установить яркость экрана в процентах.", {"level": _PERCENT}, ["level"]),
     _tool("change_brightness", "Изменить яркость экрана на указанное число процентов.", {"delta": _DELTA}, ["delta"]),
+    _tool("shortcut", "Нажать сочетание клавиш в активном окне: копировать, вставить, отменить, сохранить, "
+                      "выделить всё, очистить поле, Enter, вкладки браузера, обновить, назад, полный экран, "
+                      "окно влево/вправо.",
+          {"action": {"type": "string", "enum": list(system.SHORTCUT_KEYS)}}, ["action"]),
+    _tool("system_status", "Загрузка процессора и оперативной памяти.", {}, []),
+    _tool("gpu_status", "Температура и загрузка видеокарты.", {}, []),
+    _tool("microphone", "Включить (true) или выключить (false) микрофон.", {"state": {"type": "boolean"}}, ["state"]),
 ]
 
 
@@ -235,7 +251,7 @@ def execute_tool(name: str, args: dict) -> str:
 def _currency_codes(seg: str) -> list[str]:
     if not R["currency_trigger"].search(seg):
         return []
-    codes = [code for code, pattern in CURRENCY_WORDS.items() if re.search(pattern, seg)]
+    codes = [code for code, pattern in CURRENCY_WORDS.items() if re.search(pattern, seg) and code != CURRENCY_HOME]
     if not codes and "валют" in seg:
         codes = ["USD", "EUR", "RUB"]
     return codes
@@ -262,6 +278,29 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     # Режим сна самой помощницы
     if R["sleep_mode"].search(seg):
         return lambda: execute_tool("sleep_mode", {})
+
+    # Клавиши: копировать, вставить, вкладки, окно влево (раньше «закрой X», медиа и «открой X»)
+    for action, rx in SHORTCUT_RES:
+        if rx.search(seg):
+            return lambda a=action: execute_tool("shortcut", {"action": a})
+    if BACK_OR_PREVIOUS_RE.match(seg):          # «назад»: в браузере — страница, иначе — трек
+        return lambda: (execute_tool("shortcut", {"action": "back"}) if system.foreground_exe() in BROWSER_EXES
+                        else execute_tool("media", {"action": "previous"}))
+
+    # Микрофон (раньше «заглуши» — это общий звук), состояние компьютера (раньше погоды)
+    if R["mic_off"].search(seg):
+        return lambda: execute_tool("microphone", {"state": False})
+    if R["mic_on"].search(seg):
+        return lambda: execute_tool("microphone", {"state": True})
+    if R["gpu_status"].search(seg):
+        return lambda: execute_tool("gpu_status", {})
+    if R["system_status"].search(seg):
+        return lambda: execute_tool("system_status", {})
+
+    # Диски: «диск Д», «открой диск C»
+    m = DRIVE_RE.match(seg)
+    if m and m.group("letter") in DRIVE_LETTERS:
+        return lambda letter=DRIVE_LETTERS[m.group("letter")]: execute_tool("open_drive", {"letter": letter})
 
     # Закрыть активное окно/приложение (раньше обычного «закрой X»)
     if ACTIVE_CLOSE_RE.match(seg):
@@ -315,6 +354,15 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if m and (m.group(1).strip() in APP_ALIASES or find_app(m.group(1).strip())):
         target = m.group(1).strip()
         return lambda: execute_tool("open_app", {"name": target})      # уже запущено — развернёт окно
+
+    # «клауд на весь экран», «разверни телеграм на весь экран»
+    m = re.fullmatch(r"(?:(?:разверни|открой|сделай)\s+)?(.+?)\s+(?:на весь экран|на полный экран|во весь экран)", seg)
+    if m and (m.group(1) in APP_ALIASES or find_app(m.group(1))):
+        return lambda t=m.group(1): _open_maximized(t)
+
+    # «открой музыку» — приложение для музыки (папка — «открой папку музыка»)
+    if re.fullmatch(r"(?:открой|запусти)\s+(?:музыку|музыка|музыкальное приложение)", seg):
+        return lambda: execute_tool("open_app", {"name": MEDIA_FALLBACK_APP["music"]})
 
     # Закрыть приложение
     m = re.match(r"(?:закрой|закрыть|заверши|завершить)\s+(?:приложение\s+|программу\s+)?(.+)$", seg)
@@ -379,7 +427,7 @@ def parse_local(segment: str) -> Callable[[], str] | None:
         return lambda: execute_tool("media", {"action": "pause"})
 
     # Пустой браузер
-    if re.fullmatch(rf"(?:{OPEN_VERBS}\s+(?:мне\s+)?)?браузер", seg):
+    if re.fullmatch(rf"(?:{OPEN_VERBS}\s+(?:мне\s+)?)?(?:браузер|browser|в браузере)", seg):
         return lambda: execute_tool("open_browser", {})
 
     # Короткие формы без глагола: «музыка», «ютуб», «яндекс музыка», «телеграм»
@@ -416,6 +464,15 @@ def parse_local(segment: str) -> Callable[[], str] | None:
             return lambda: execute_tool("open_app", {"name": target})
 
     return None
+
+
+def _open_maximized(name: str) -> str:
+    """Показать приложение и развернуть его окно. Только что запущенное — не трогаем: окна ещё нет."""
+    result = execute_tool("open_app", {"name": name})
+    if result.startswith(("развернул", "показал")):
+        time.sleep(0.3)
+        execute_tool("window_state", {"action": "maximize"})
+    return result
 
 
 _NUMBER_WORD_RE = re.compile(r"\b(?:" + "|".join(sorted({*_UNITS, *_TENS, "сто"}, key=len, reverse=True)) + r")\b")
@@ -566,9 +623,28 @@ def detect_site(text: str) -> str | None:
     return None
 
 
+BROWSER_SITE_RE = re.compile(
+    rf"(?:{OPEN_VERBS}\s+)?(?:в\s+)?(?:браузер\w*|browser)[\s,]+(?:{OPEN_VERBS}\s+)?(?P<rest>.+)"
+    rf"|(?:{OPEN_VERBS}\s+)?(?P<rest2>.+?)[\s,]+(?:в\s+)?(?:браузер\w*|browser)")
+
+
+def exact_site(text: str) -> str | None:
+    """Текст целиком — название сайта: «переводчик», «google collab»."""
+    text = text.strip(PUNCT)
+    for site, pattern in SITE_PATTERNS:
+        if pattern.fullmatch(text):
+            return site
+    return None
+
+
 def parse_search(low: str) -> Callable[[], str] | None:
     """«найди котиков на ютубе», «открой ютуб и напиши в поиске котики», «загугли ...»,
     короткие формы: «ютуб котики», «гугл погода в лондоне», «найди рецепт борща»."""
+    m = BROWSER_SITE_RE.fullmatch(low)           # «браузер, переводчик», «открой в браузере google collab»
+    if m:
+        named = exact_site(m.group("rest") or m.group("rest2"))
+        if named:
+            return lambda: execute_tool("open_browser", {"site": named})
     site = detect_site(low)
     if site is None:
         m = IN_BROWSER_RE.match(low)
@@ -616,7 +692,7 @@ def fix_hearing(low: str) -> str:
     """Исправляет типичные ошибки Whisper из phrases.HEARING_FIXES: «напомнив 6» → «напомни в 6»."""
     for pattern, replacement in _HEARING_FIXES:
         low = pattern.sub(replacement, low)
-    return low
+    return " ".join(low.split())
 
 
 # Команды, после которых продолжения не бывает: их можно выполнять после короткой паузы
@@ -646,28 +722,40 @@ def is_quick_command(text: str, need_name: bool = True, pending: bool = False) -
         return False
     if parse_media(body) or parse_app_volume(body):
         return True
+    if any(rx.search(body) for _, rx in SHORTCUT_RES):
+        return True
     if (R["volume_set"].search(body) or R["bright_set"].search(body)) and parse_number(body) is not None:
         return True
     return any(R[key].search(body) for key in _QUICK_KEYS)
 
 
+PRONOUN_RE = re.compile(r"^(открой|закрой|сверни|разверни|запусти)\s+(?:его|её|ее|него|неё|нее|это|их)$")
+
+
 def parse_all(low: str) -> list[Callable[[], str]] | None:
     """Разбирает всю команду без ИИ. Если хоть одна часть не разобралась — None (всё уйдёт в ИИ)."""
     low = fix_hearing(low)
+    if BACK_OR_PREVIOUS_RE.match(low):                  # «назад» — до медиа: в браузере это страница назад
+        return [parse_local(low)]
     # «ютуб стоп» — пауза, «ютуб на 30» — громкость, а не поиск; напоминание не режем по «и»
     whole = parse_reminder(low) or parse_app_volume(low) or parse_media(low) or parse_search(low)
     if whole:
         return [whole]
+    if calc.parse(low):                                 # «2 плюс 2», «5 миль в километрах», «доллар к тенге»
+        return [lambda: execute_tool("calculate", {"text": low})]
     if R["timer_set"].search(low) or R["datefull"].search(low) or _currency_codes(low):   # их нельзя резать по «и»
         whole = parse_local(low)
         if whole:
             return [whole]
     actions: list[Callable[[], str]] = []
-    last_verb = ""
+    last_verb = last_target = ""
     for segment in SPLIT_RE.split(low):
         segment = segment.strip(PUNCT)
         if not segment:
             continue
+        pronoun = PRONOUN_RE.match(segment)             # «открой телеграм, а потом закрой его»
+        if pronoun and last_target:
+            segment = f"{pronoun.group(1)} {last_target}"
         action = parse_local(segment)
         if action is None and last_verb:                # «открой телеграм и браузер» → «открой браузер»
             action = parse_local(f"{last_verb} {segment}")
@@ -677,6 +765,7 @@ def parse_all(low: str) -> list[Callable[[], str]] | None:
         verb = VERB_RE.match(segment)
         if verb:
             last_verb = verb.group(1)
+            last_target = segment[verb.end():].strip(PUNCT) or last_target
     return actions or None
 
 
@@ -805,7 +894,7 @@ def dialog_accepts(command: str) -> bool:
         return False
     if DICTATE_RE.match(stripped) or any(p.match(stripped) for p in NOTE_ADD_RE) or REPEAT_RE.match(low):
         return True
-    if smart.parse(low) is not None:              # вопрос, «переведи выделенное», «что на экране»
+    if smart.parse(fix_hearing(low)) is not None:   # вопрос, «переведи выделенное», «что на экране»
         return True
     return not DIALOG_LOCAL_ONLY or parse_all(low) is not None
 
@@ -849,7 +938,7 @@ def handle_command(command: str) -> bool:
         return True
 
     # Вопросы, выделенный текст, «что на экране» — к ИИ без инструментов
-    smart_action = smart.parse(low)
+    smart_action = smart.parse(fix_hearing(low))
     if smart_action:
         log("ИИ: текст", low)
         run_smart(smart_action, low)
