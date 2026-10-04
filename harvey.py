@@ -25,6 +25,7 @@ import os
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")   # до импорта torch и ctranslate2
 
+import numpy as np
 import os
 import queue
 import re
@@ -99,6 +100,7 @@ from core.commands import (  # noqa: F401
     _warmup_llm,
     dialog_accepts,
     handle_command,
+    is_quick_command,
     unload_model,
 )
 import core.daily as daily
@@ -193,7 +195,20 @@ def main() -> None:
                 # Без имени слушаем, только пока Харви молчит: иначе она услышит саму себя
                 dialog_open = bool(dialog_until) and not speaking
                 _chimes.warm()                       # пока вы говорите, готовим звук «готово» — он прозвучит без задержки
-                audio = record_utterance(audio_q, pre_buffer, block, limit)
+                early: dict[str, str] = {}
+
+                def early_check(candidate: np.ndarray) -> bool:
+                    # После короткой паузы: если это законченная команда («пауза», «громкость 30») — не ждём дальше
+                    if daily._sleeping or (_wake.enabled and not _wake.peek() and not dialog_open):
+                        return False
+                    guess = transcribe(candidate)
+                    if guess and is_quick_command(guess, need_name=not dialog_open,
+                                                  pending=daily._pending is not None):
+                        early["text"] = guess
+                        return True
+                    return False
+
+                audio = record_utterance(audio_q, pre_buffer, block, limit, early_check if EARLY_SILENCE else None)
                 pre_buffer.clear()
                 heard_name = _wake.take()
                 if audio is None:
@@ -204,11 +219,11 @@ def main() -> None:
                         (dialog_open or daily._pending is not None or speaking) and not daily._sleeping):
                     continue
 
-                text = transcribe(audio)
+                text = early.get("text") or transcribe(audio)
                 low = text.lower()
                 if not low or is_noise(low):
                     continue
-                log("Распознано", text)
+                log("Распознано", text + (" (досрочно)" if early else ""))
 
                 m = WAKE_PATTERN.search(low)
                 named = m is not None or heard_name

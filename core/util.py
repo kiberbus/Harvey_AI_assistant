@@ -46,7 +46,7 @@ PIPER_MODEL = PIPER_DIR / f"ru_RU-{PIPER_VOICE}-medium.onnx"
 # ───────────────────────── СЛУЖЕБНОЕ ─────────────────────────
 OWN_PID = os.getpid()
 FAIL = "!"                            # префикс фразы-ошибки внутри инструментов
-PUNCT = " ,.!?:;-—…"
+PUNCT = " ,.!?:;-—–…"
 
 WAKE_PATTERN = re.compile(r"\b(" + "|".join(sorted(set(WAKE_WORDS))) + r")\b", re.IGNORECASE)
 

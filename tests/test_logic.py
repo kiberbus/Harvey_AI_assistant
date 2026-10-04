@@ -188,3 +188,70 @@ def test_kinds_yandex_app_window_does_not_make_video_music(monkeypatch):
 def test_kinds_music_app(monkeypatch):
     track = {"app": "ru.yandex.desktop.music", "title": "Встреча", "artist": "x", "album": ""}
     assert _kinds(monkeypatch, track, []) == {"music"}
+
+
+# ── ошибки слуха и досрочное распознавание ──
+
+@pytest.mark.parametrize("heard,fixed", [
+    ("напомнив 6 вечера позвонить маме", "напомни в 6 вечера позвонить маме"),
+    ("напомнив, в шесть вечера", "напомни в шесть вечера"),
+    ("откройте telegram", "открой telegram"),
+    ("youtube stop", "youtube стоп"),
+    ("ютуб штоп", "ютуб стоп"),
+    ("следующий трик", "следующий трек"),
+])
+def test_fix_hearing(heard, fixed):
+    assert commands.fix_hearing(heard) == fixed
+
+
+@pytest.mark.parametrize("text,quick", [
+    ("Харви, пауза.", True),
+    ("Харви, громкость 30.", True),
+    ("Харви, музыку тише.", True),
+    ("Харви, ютуб стоп.", True),
+    ("Харви, следующий трек.", True),
+    ("Харви, сколько времени?", True),
+    ("Харви, спать.", True),
+    ("Харви, громкость", False),                    # число ещё не сказано
+    ("Харви, найди рецепт", False),                 # у поиска бывает продолжение
+    ("Харви, напомни в 6 вечера", False),
+    ("Харви, открой телеграм", False),
+    ("Харви, запиши привет", False),
+    ("Харви, громкость 30 и", False),               # явно продолжение
+    ("Харви.", False),                              # одно имя — ждём команду как обычно
+    ("пауза", False),                               # без имени — только в диалоге
+])
+def test_is_quick_command(text, quick):
+    assert commands.is_quick_command(text) is quick
+
+
+def test_quick_without_name_in_dialog_and_yes_when_pending():
+    assert commands.is_quick_command("пауза", need_name=False)
+    assert commands.is_quick_command("да", need_name=False, pending=True)
+    assert not commands.is_quick_command("да", need_name=False, pending=False)
+
+
+def test_record_utterance_returns_early():
+    """Короткая команда: запись заканчивается после EARLY_SILENCE, а не после SILENCE_DURATION."""
+    import queue
+    from collections import deque
+
+    import numpy as np
+
+    from core import stt
+    loud = np.full((stt.BLOCK_SIZE, 1), 0.3, dtype=np.float32)
+    quiet = np.zeros((stt.BLOCK_SIZE, 1), dtype=np.float32)
+    q = queue.Queue()
+    for block in [loud] * 8 + [quiet] * 30:
+        q.put(block)
+    checked = []
+    audio = stt.record_utterance(q, deque(), loud.flatten(), 0.05, lambda a: checked.append(len(a)) or True)
+    used = 38 - q.qsize()
+    assert checked and used == 8 + stt.EARLY_SILENCE_BLOCKS        # не ждали полную паузу
+    assert audio is not None and len(audio) == checked[0]
+
+    q2 = queue.Queue()
+    for block in [loud] * 8 + [quiet] * 30:
+        q2.put(block)
+    stt.record_utterance(q2, deque(), loud.flatten(), 0.05, lambda a: False)
+    assert 38 - q2.qsize() == 8 + stt.SILENCE_BLOCKS                # команда не законченная — ждём как раньше

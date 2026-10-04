@@ -45,7 +45,9 @@ from core.util import (  # noqa: F401
     SITE_MENTION_RE,
     SITE_PATTERNS,
     SPLIT_RE,
+    STOP_RE,
     VERB_RE,
+    WAKE_PATTERN,
     _TENS,
     _UNITS,
     compose,
@@ -607,8 +609,51 @@ def parse_search(low: str) -> Callable[[], str] | None:
     return lambda: execute_tool("open_browser", {"site": site, "query": query})
 
 
+_HEARING_FIXES = [(re.compile(pattern), replacement) for pattern, replacement in HEARING_FIXES]
+
+
+def fix_hearing(low: str) -> str:
+    """Исправляет типичные ошибки Whisper из phrases.HEARING_FIXES: «напомнив 6» → «напомни в 6»."""
+    for pattern, replacement in _HEARING_FIXES:
+        low = pattern.sub(replacement, low)
+    return low
+
+
+# Команды, после которых продолжения не бывает: их можно выполнять после короткой паузы
+_QUICK_KEYS = ("time", "date", "weekday", "datefull", "sleep_mode", "now_playing", "mute", "unmute",
+               "media_next", "media_prev", "media_pause", "media_play",
+               "volume_up", "volume_down", "bright_up", "bright_down")
+
+
+def is_quick_command(text: str, need_name: bool = True, pending: bool = False) -> bool:
+    """«Харви, пауза», «Харви, громкость 30», «Харви, сколько времени» — законченная короткая команда.
+    Поиск, напоминания, диктовка, открытие приложений и вопросы к ИИ сюда не попадают: у них
+    после паузы часто идёт продолжение («найди рецепт… борща»)."""
+    low = text.lower()
+    m = WAKE_PATTERN.search(low)
+    if m:
+        low = low[m.end():]
+    elif need_name:
+        return False
+    body = fix_hearing(" ".join(low.strip(PUNCT).split()))
+    if not body or body.endswith((" и", " а", " потом", " затем")):
+        return False
+    if pending and (R["yes"].search(body) or R["no"].search(body)):
+        return True
+    if SILENCE_RE.match(body) or STOP_RE.match(body):
+        return True
+    if parse_all(body) is None:
+        return False
+    if parse_media(body) or parse_app_volume(body):
+        return True
+    if (R["volume_set"].search(body) or R["bright_set"].search(body)) and parse_number(body) is not None:
+        return True
+    return any(R[key].search(body) for key in _QUICK_KEYS)
+
+
 def parse_all(low: str) -> list[Callable[[], str]] | None:
     """Разбирает всю команду без ИИ. Если хоть одна часть не разобралась — None (всё уйдёт в ИИ)."""
+    low = fix_hearing(low)
     # «ютуб стоп» — пауза, «ютуб на 30» — громкость, а не поиск; напоминание не режем по «и»
     whole = parse_reminder(low) or parse_app_volume(low) or parse_media(low) or parse_search(low)
     if whole:

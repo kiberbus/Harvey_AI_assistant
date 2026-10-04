@@ -10,6 +10,7 @@ import sounddevice as sd
 import threading
 from collections import deque
 from pathlib import Path
+from typing import Callable
 
 from config import *      # noqa: F401,F403
 from phrases import *     # noqa: F401,F403
@@ -22,6 +23,8 @@ from core.util import (  # noqa: F401
 
 PRE_BUFFER_BLOCKS = int(PRE_BUFFER_SEC * SAMPLE_RATE / BLOCK_SIZE)
 SILENCE_BLOCKS = int(SILENCE_DURATION * SAMPLE_RATE / BLOCK_SIZE)
+EARLY_SILENCE_BLOCKS = max(1, round(EARLY_SILENCE * SAMPLE_RATE / BLOCK_SIZE)) if EARLY_SILENCE else 0
+EARLY_MAX_BLOCKS = int(EARLY_MAX_SEC * SAMPLE_RATE / BLOCK_SIZE)
 MIN_SPEECH_BLOCKS = int(MIN_UTTERANCE_SEC * SAMPLE_RATE / BLOCK_SIZE)
 MAX_UTTERANCE_BLOCKS = int(MAX_UTTERANCE_SEC * SAMPLE_RATE / BLOCK_SIZE)
 COMMAND_WAIT_BLOCKS = int(COMMAND_TIMEOUT * SAMPLE_RATE / BLOCK_SIZE)
@@ -127,6 +130,7 @@ def transcribe(audio: np.ndarray) -> str:
             best_of=1,
             temperature=0.0,
             initial_prompt=WHISPER_PROMPT,
+            hotwords=WHISPER_HOTWORDS or None,
             vad_filter=False,
             condition_on_previous_text=False,
             without_timestamps=True,
@@ -179,6 +183,10 @@ class WakeDetector:
             log("Wake", f"ошибка: {e} — отключаю, имя будет искать Whisper")
             self._model = None
 
+    def peek(self) -> bool:
+        """Звучало ли имя (флаг не сбрасывается)."""
+        return self._hit
+
     def take(self) -> bool:
         """Звучало ли имя с прошлой проверки (флаг сбрасывается)."""
         hit, self._hit = self._hit, False
@@ -225,14 +233,23 @@ def drain(q: queue.Queue) -> None:
 
 
 def record_utterance(audio_q: queue.Queue, pre_buffer: deque, first_block: np.ndarray,
-                     threshold: float) -> np.ndarray | None:
-    """Пишет фразу от первого громкого блока до паузы; лишнюю тишину в конце обрезает (быстрее STT)."""
+                     threshold: float, early_check: Callable[[np.ndarray], bool] | None = None) -> np.ndarray | None:
+    """Пишет фразу от первого громкого блока до паузы; лишнюю тишину в конце обрезает (быстрее STT).
+    early_check: после короткой паузы (EARLY_SILENCE) спрашиваем, не законченная ли это команда —
+    если да, не ждём полную паузу SILENCE_DURATION («пауза», «громкость 30» срабатывают на ~0.5 с раньше)."""
     chunks = list(pre_buffer) + [first_block]
-    silent = 0
+    silent = checks = 0
     while silent < SILENCE_BLOCKS and len(chunks) < MAX_UTTERANCE_BLOCKS:
         block = _get_block(audio_q)
         chunks.append(block)
         silent = silent + 1 if _rms(block) < threshold else 0
+        if (early_check and silent == EARLY_SILENCE_BLOCKS and checks < 2
+                and MIN_SPEECH_BLOCKS <= len(chunks) <= EARLY_MAX_BLOCKS):
+            checks += 1
+            trim = silent - TAIL_KEEP_BLOCKS
+            candidate = np.concatenate(chunks[:-trim] if trim > 0 else chunks)
+            if early_check(candidate):
+                return candidate
     if silent > TAIL_KEEP_BLOCKS:
         chunks = chunks[:-(silent - TAIL_KEEP_BLOCKS)]
     if len(chunks) < MIN_SPEECH_BLOCKS:
