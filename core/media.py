@@ -9,8 +9,16 @@ import threading
 import time
 from ctypes import wintypes
 
-from config import *      # noqa: F401,F403
-from phrases import *     # noqa: F401,F403
+from config import (
+    BROWSER_EXES,
+    FEMALE_VOICE,
+    MEDIA_FALLBACK_APP,
+    MEDIA_FALLBACK_SITE,
+    MUSIC_APPS,
+    MUSIC_APP_PLAY_BUTTONS,
+    MUSIC_SITES,
+    VIDEO_APPS,
+)
 from core.util import (  # noqa: F401
     END,
     FAIL,

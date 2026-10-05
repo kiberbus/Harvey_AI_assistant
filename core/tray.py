@@ -10,8 +10,15 @@ import threading
 import time
 from pathlib import Path
 
-from config import *      # noqa: F401,F403
-from phrases import *     # noqa: F401,F403
+from config import (
+    ASSISTANT_NAME,
+    BASE_DIR,
+    LOG_ENABLED,
+    LOG_FILE,
+    TRAY_ENABLED,
+    WAKE_COLLECT,
+    WAKE_SAMPLES_DIR,
+)
 from core.util import (  # noqa: F401
     log,
 )

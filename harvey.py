@@ -37,8 +37,22 @@ import threading
 import time
 from collections import deque
 
-from config import *      # noqa: F401,F403
-from phrases import *     # noqa: F401,F403
+from config import (
+    ASSISTANT_NAME,
+    BASE_DIR,
+    BLOCK_SIZE,
+    DIALOG_MODE,
+    DIALOG_TIMEOUT,
+    EARLY_SILENCE,
+    ECHO_THRESHOLD_FACTOR,
+    FEMALE_VOICE,
+    LOG_MAX_MB,
+    QUIET_MODE,
+    SAMPLE_RATE,
+    WAKE_BEEP,
+    WAKE_GATE,
+    WAKE_THRESHOLD,
+)
 from core.util import (  # noqa: F401
     DIALOG_END_RE,
     END,
@@ -103,9 +117,9 @@ from core.commands import (  # noqa: F401
     _warmup_llm,
     dialog_accepts,
     handle_command,
-    is_quick_command,
     unload_model,
 )
+from core.parse import is_quick_command
 import core.daily as daily
 import core.stt as stt
 import core.system as system

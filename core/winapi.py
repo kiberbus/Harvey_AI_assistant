@@ -7,8 +7,6 @@ import sys
 import time
 from ctypes import wintypes
 
-from config import *      # noqa: F401,F403
-from phrases import *     # noqa: F401,F403
 from core.util import (  # noqa: F401
     psutil,
 )

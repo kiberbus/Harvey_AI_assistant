@@ -13,8 +13,29 @@ from typing import Callable
 
 import ollama
 
-from config import *      # noqa: F401,F403
-from phrases import *     # noqa: F401,F403
+from config import (
+    ASSISTANT_NAME,
+    FEMALE_VOICE,
+    HONORIFIC,
+    MODEL,
+    NUM_CTX,
+    REWRITE_LAST_SEC,
+    SCREEN_AREA,
+    SCREEN_MAX_SIDE,
+    SELECTION_MAX_CHARS,
+    SMART_DICTATION,
+    USE_HONORIFIC,
+    VISION_ENABLED,
+)
+from phrases import (
+    QUESTION,
+    REWRITE_STYLES,
+    SCREEN,
+    SELECTION_ACTIONS,
+    SELECTION_THIS,
+    SELECTION_WORDS,
+    TRANSLATE_LANGS,
+)
 from core import llm
 from core.util import (  # noqa: F401
     END,

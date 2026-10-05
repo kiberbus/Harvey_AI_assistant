@@ -8,8 +8,40 @@ import random
 import re
 from logging.handlers import RotatingFileHandler
 
-from config import *      # noqa: F401,F403
-from phrases import *     # noqa: F401,F403
+from config import (
+    BASE_DIR,
+    FEMALE_VOICE,
+    HONORIFIC,
+    LOG_ENABLED,
+    LOG_FILE,
+    LOG_MAX_MB,
+    NAME_GROUPS,
+    PIPER_VOICE,
+    SHORT_REPLIES,
+    SPEAK_ERRORS,
+    USE_HONORIFIC,
+    WAKE_WORDS,
+)
+from phrases import (
+    APP_VOLUME_DOWN,
+    APP_VOLUME_FILLER,
+    APP_VOLUME_UP,
+    BACK_OR_PREVIOUS,
+    DRIVE,
+    GOOGLE,
+    MEDIA_FILLER,
+    MEDIA_TARGETS,
+    MEDIA_UNPAUSE,
+    MEDIA_VERBS,
+    NOTE_ADD,
+    PHRASES,
+    REMIND_CANCEL,
+    REMIND_LIST,
+    REMIND_VERB,
+    SHORTCUTS,
+    SITE_ALIASES,
+    YT,
+)
 
 
 try:

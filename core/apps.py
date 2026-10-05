@@ -14,8 +14,23 @@ import urllib.parse
 from ctypes import wintypes
 from pathlib import Path
 
-from config import *      # noqa: F401,F403
-from phrases import *     # noqa: F401,F403
+from config import (
+    BROWSER_EXE,
+    BROWSER_EXES,
+    DICTATION_MODE,
+    DOCUMENT_EXES,
+    FOLDERS,
+    MUSIC_APPS,
+    NAME_GROUPS,
+    PROTECTED_EXES,
+    QUIET_MODE,
+    SITES,
+    SPEAK_ERRORS,
+)
+from phrases import (
+    FOLDER_ALIASES,
+    SITE_ALIASES,
+)
 from core.util import (  # noqa: F401
     END,
     FAIL,

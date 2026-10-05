@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import harvey  # noqa: E402,F401  — точка входа тоже должна импортироваться без ошибок
-from core import apps, commands, util  # noqa: E402
+from core import apps, parse, tools, util  # noqa: E402
 
 # Список приложений из меню «Пуск» подменяем: тесты не должны зависеть от того, что установлено
 apps._apps_cache = [
@@ -28,7 +28,7 @@ def calls(monkeypatch):
         recorded.append((name, dict(args)))
         return "ok"
 
-    monkeypatch.setattr(commands, "execute_tool", fake_execute)
+    monkeypatch.setattr(tools, "execute_tool", fake_execute)
     return recorded
 
 
@@ -38,7 +38,7 @@ def run(calls):
     None — фраза ушла бы в ИИ."""
     def _run(text: str):
         calls.clear()
-        actions = commands.parse_all(text.lower().strip(util.PUNCT))
+        actions = parse.parse_all(text.lower().strip(util.PUNCT))
         if actions is None:
             return None
         results = [action() for action in actions]

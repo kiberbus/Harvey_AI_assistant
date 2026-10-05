@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import ollama
 
-from config import *      # noqa: F401,F403
+from config import (
+    KEEP_ALIVE,
+    MODEL,
+    NUM_CTX,
+)
 
 
 def _kwargs(messages: list[dict], tools: list | None, num_predict: int, num_ctx: int | None) -> dict:

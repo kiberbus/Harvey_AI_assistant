@@ -12,8 +12,17 @@ import operator
 import re
 from typing import Callable
 
-from config import *      # noqa: F401,F403
-from phrases import *     # noqa: F401,F403
+from config import (
+    FEMALE_VOICE,
+)
+from phrases import (
+    CALC_OPERATORS,
+    CALC_PREFIX,
+    CURRENCY_CONVERT,
+    CURRENCY_FORMS,
+    CURRENCY_WORDS,
+    UNITS,
+)
 from core.util import (  # noqa: F401
     FAIL,
     INFO,

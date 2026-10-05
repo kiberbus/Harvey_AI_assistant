@@ -8,7 +8,7 @@ import pytest
 
 import harvey
 import phrases
-from core import commands, media, speech, util
+from core import commands, media, parse, speech, tools, util
 
 ROOT = Path(harvey.__file__).resolve().parent
 I, F, R = util.INFO, util.FAIL, util.RAW
@@ -32,9 +32,9 @@ def test_all_phrase_patterns_compile():
 
 def test_tools_match_functions():
     """Каждый инструмент, который видит ИИ, существует; каждая функция вызывается."""
-    for tool in commands.TOOLS:
-        assert tool["function"]["name"] in commands.FUNCTIONS
-    for name, fn in commands.FUNCTIONS.items():
+    for tool in tools.TOOLS:
+        assert tool["function"]["name"] in tools.FUNCTIONS
+    for name, fn in tools.FUNCTIONS.items():
         assert callable(fn), name
 
 
@@ -82,7 +82,7 @@ def test_parse_number(text, expected):
     ("двадцать пять минут", "25 минут"),
 ])
 def test_numbers_to_digits(text, expected):
-    assert commands._numbers_to_digits(text) == expected
+    assert parse._numbers_to_digits(text) == expected
 
 
 def test_tts_normalization():
@@ -94,7 +94,7 @@ def test_tts_normalization():
 
 def _reminder(calls, text):
     calls.clear()
-    action = commands.parse_reminder(text)
+    action = parse.parse_reminder(text)
     assert action is not None, text
     action()
     (name, args), = calls
@@ -127,7 +127,7 @@ def test_reminder_in_minutes(calls):
 
 
 def test_reminder_without_time_asks_when(calls):
-    result = commands.parse_reminder("напомни позвонить маме")()
+    result = parse.parse_reminder("напомни позвонить маме")()
     assert result.startswith(I) and "когда" in result and not calls
 
 
@@ -200,7 +200,7 @@ def test_kinds_music_app(monkeypatch):
     ("следующий трик", "следующий трек"),
 ])
 def test_fix_hearing(heard, fixed):
-    assert commands.fix_hearing(heard) == fixed
+    assert parse.fix_hearing(heard) == fixed
 
 
 @pytest.mark.parametrize("text,quick", [
@@ -221,13 +221,13 @@ def test_fix_hearing(heard, fixed):
     ("пауза", False),                               # без имени — только в диалоге
 ])
 def test_is_quick_command(text, quick):
-    assert commands.is_quick_command(text) is quick
+    assert parse.is_quick_command(text) is quick
 
 
 def test_quick_without_name_in_dialog_and_yes_when_pending():
-    assert commands.is_quick_command("пауза", need_name=False)
-    assert commands.is_quick_command("да", need_name=False, pending=True)
-    assert not commands.is_quick_command("да", need_name=False, pending=False)
+    assert parse.is_quick_command("пауза", need_name=False)
+    assert parse.is_quick_command("да", need_name=False, pending=True)
+    assert not parse.is_quick_command("да", need_name=False, pending=False)
 
 
 def test_record_utterance_returns_early():

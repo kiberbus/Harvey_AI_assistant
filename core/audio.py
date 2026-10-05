@@ -6,8 +6,13 @@ import ctypes
 import json
 import time
 
-from config import *      # noqa: F401,F403
-from phrases import *     # noqa: F401,F403
+from config import (
+    BASE_DIR,
+    DUCK_FACTOR,
+    DUCK_MAX_SEC,
+    FADE_STEPS,
+    NO_VOLUME_CONTROL,
+)
 from core.util import (  # noqa: F401
     AudioUtilities,
     CLSCTX_ALL,

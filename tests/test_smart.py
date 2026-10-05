@@ -2,7 +2,7 @@
 
 import pytest
 
-from core import commands, smart
+from core import commands, parse, smart
 
 
 def route(text: str):
@@ -68,7 +68,7 @@ def test_route(phrase, expected):
 
 def test_commands_win_over_questions():
     """«Переведи компьютер в спящий режим» — команда, а не перевод: обычные команды проверяются раньше."""
-    assert commands.parse_all("переведи компьютер в спящий режим") is not None
+    assert parse.parse_all("переведи компьютер в спящий режим") is not None
 
 
 def test_screen_off_without_vision(monkeypatch):

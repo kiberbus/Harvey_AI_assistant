@@ -12,8 +12,22 @@ import threading
 import time
 from pathlib import Path
 
-from config import *      # noqa: F401,F403
-from phrases import *     # noqa: F401,F403
+from config import (
+    ASSISTANT_NAME,
+    BASE_DIR,
+    BEEP_FREQ,
+    BEEP_MS,
+    CHIME_IDLE_SEC,
+    PIPER_VOICE,
+    QUIET_MODE,
+    SILERO_DEVICE,
+    SILERO_MODEL,
+    SILERO_SAMPLE_RATE,
+    SILERO_SPEAKER,
+    SOUND_VOLUME,
+    TTS_ENGINE,
+    TTS_SPEED,
+)
 from core.util import (  # noqa: F401
     PIPER_DIR,
     PIPER_MODEL,

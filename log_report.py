@@ -40,7 +40,7 @@ def _local_checker() -> Callable[[str], bool] | None:
     """Понимает ли фразу текущий код без ИИ (команда или вопрос к ИИ без инструментов).
     None — код не импортировался (отчёт тогда строится без этой проверки)."""
     try:
-        from core import commands, smart
+        from core import parse, smart
         from core.util import LAST_ACTION_RE, PUNCT, REPEAT_RE, R, SILENCE_RE
     except Exception:
         return None
@@ -51,7 +51,7 @@ def _local_checker() -> Callable[[str], bool] | None:
             if (R["exit"].search(low) or R["cancel_command"].search(low) or SILENCE_RE.match(low)
                     or REPEAT_RE.match(low) or LAST_ACTION_RE.match(low)):    # их handle_command берёт до правил
                 return True
-            return commands.parse_all(low) is not None or smart.parse(commands.fix_hearing(low)) is not None
+            return parse.parse_all(low) is not None or smart.parse(parse.fix_hearing(low)) is not None
         except Exception:
             return False
     return understood

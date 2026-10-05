@@ -9,8 +9,9 @@ import threading
 import time
 from ctypes import wintypes
 
-from config import *      # noqa: F401,F403
-from phrases import *     # noqa: F401,F403
+from config import (
+    FEMALE_VOICE,
+)
 from core.util import (  # noqa: F401
     AudioUtilities,
     CLSCTX_ALL,

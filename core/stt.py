@@ -15,8 +15,32 @@ import sys
 from pathlib import Path
 from typing import Callable
 
-from config import *      # noqa: F401,F403
-from phrases import *     # noqa: F401,F403
+from config import (
+    BASE_DIR,
+    BLOCK_SIZE,
+    COMMAND_TIMEOUT,
+    EARLY_MAX_SEC,
+    EARLY_SILENCE,
+    MAX_UTTERANCE_SEC,
+    MIN_UTTERANCE_SEC,
+    PRE_BUFFER_SEC,
+    SAMPLE_RATE,
+    SILENCE_DURATION,
+    TAIL_KEEP_BLOCKS,
+    VAD_ENABLED,
+    VAD_THRESHOLD,
+    WAKE_COLLECT,
+    WAKE_MODEL,
+    WAKE_SAMPLES_DIR,
+    WAKE_SAMPLES_MAX,
+    WAKE_THRESHOLD,
+    WHISPER_COMPUTE,
+    WHISPER_CPU_MODEL,
+    WHISPER_DEVICE,
+    WHISPER_HOTWORDS,
+    WHISPER_MODEL_SIZE,
+    WHISPER_PROMPT,
+)
 from core.util import (  # noqa: F401
     HALLUCINATIONS,
     PUNCT,

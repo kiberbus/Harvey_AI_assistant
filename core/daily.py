@@ -11,8 +11,19 @@ import time
 import urllib.parse
 from datetime import datetime
 
-from config import *      # noqa: F401,F403
-from phrases import *     # noqa: F401,F403
+from config import (
+    CONFIRM_DANGEROUS,
+    CONFIRM_TIMEOUT,
+    CURRENCY_HOME,
+    CURRENCY_HOME_NAME,
+    NOTES_FILE,
+    POWER_DELAY_SEC,
+    REMINDERS_FILE,
+    WEATHER_CITY,
+)
+from phrases import (
+    CURRENCY_SPOKEN,
+)
 from core.util import (  # noqa: F401
     END,
     FAIL,
@@ -378,7 +389,7 @@ def start_reminders() -> None:
 
 
 def _execute(name: str, args: dict) -> str:
-    """commands импортирует этот модуль, поэтому execute_tool подтягиваем при вызове."""
-    from core.commands import execute_tool
+    """tools импортирует этот модуль, поэтому execute_tool подтягиваем при вызове."""
+    from core.tools import execute_tool
 
     return execute_tool(name, args)
