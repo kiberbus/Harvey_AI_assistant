@@ -318,3 +318,19 @@ def test_collect_saves_without_whisper(monkeypatch, tmp_path):
     while stt._collect_lock.locked():
         _time.sleep(0.02)
     assert len(list(tmp_path.glob("*.wav"))) == 1
+
+
+# ── закрытие: папки и вкладки сайтов ──
+
+def test_folder_and_site_names():
+    from core import apps
+    assert apps._folder_names("загрузки") == {"загрузки", "downloads"}
+    assert apps._folder_names("телеграм") is None
+    assert apps._site_keywords("ютуб") == {"ютуб", "youtube"}
+    assert apps._site_keywords("телеграм") == set()
+
+
+@pytest.mark.parametrize("spoken,exe", [("диспетчер задачи", "taskmgr.exe"), ("телеграмма", "telegram.exe")])
+def test_close_target_fuzzy(spoken, exe):
+    from core import apps
+    assert apps._target_exes(spoken) == {exe}

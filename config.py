@@ -122,7 +122,7 @@ WHISPER_COMPUTE = "int8_float16" # на cuda; для процессора авт
 WHISPER_PROMPT = ("Харви, открой YouTube, запусти Telegram, открой Claude, громкость пятьдесят процентов, "
                   "пауза, таймер, заметки, погода, запиши.")
 # Слова, которые Whisper должен узнавать в первую очередь (на тесте: 49/50 команд против 47/50 без них)
-WHISPER_HOTWORDS = "Харви Claude Telegram YouTube Яндекс Музыка громкость пауза трек"
+WHISPER_HOTWORDS = "Харви Claude Telegram YouTube Яндекс Музыка громкость пауза трек Obsidian Stepik"
 
 # ───────────────────────── ГОЛОС (СИНТЕЗ РЕЧИ) ─────────────────────────
 TTS_ENGINE = "silero"            # "silero" — естественный голос; "piper" — запасной (если Silero не загрузится, включится сам)
@@ -155,6 +155,7 @@ SITES = {
     "translate": "https://translate.google.com",
     "colab": "https://colab.research.google.com",
     "astanahub": "https://astanahub.com",
+    "stepik": "https://stepik.org",
 }
 
 _HOME = os.path.expanduser("~")
@@ -171,7 +172,7 @@ FOLDERS = {
 NAME_GROUPS = [
     # (как приложение можно назвать голосом, имена его процессов — нужны для «закрой»)
     ({"telegram", "телеграм", "телеграмм", "тг"}, ("telegram.exe",)),
-    ({"claude", "cloud", "клод", "клода", "клоду", "клауд", "клауде", "клауды", "клаут", "клоуд"}, ("claude.exe",)),
+    ({"claude", "cloud", "клод", "клода", "клоду", "клауд", "клауде", "клауды", "клаут", "клоуд", "глауд"}, ("claude.exe",)),
     ({"яндекс музыка", "яндекс музыку", "яндекс музыке", "яндекс.музыка", "yandex music"}, ("яндекс музыка.exe",)),
     ({"notepad", "блокнот"}, ("notepad.exe",)),
     ({"calculator", "калькулятор"}, ("calculatorapp.exe", "calculator.exe")),

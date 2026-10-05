@@ -28,6 +28,7 @@ from core.util import (  # noqa: F401
     FAIL,
     INFO,
     IN_BROWSER_RE,
+    LAST_ACTION_RE,
     MEDIA_FILLER_RE,
     MEDIA_TARGET_RES,
     MEDIA_UNPAUSE_RE,
@@ -269,6 +270,11 @@ def parse_local(segment: str) -> Callable[[], str] | None:
 
     if R["self_restart"].search(seg):
         return lambda: execute_tool("restart_self", {})
+
+    # «Открой» без названия — переспрашиваем (ответ можно дать без «Харви», в окне диалога).
+    # Голые «включи» / «запусти» сюда не доходят: это «продолжи воспроизведение» (parse_media)
+    if seg == "открой":
+        return lambda: f"{RAW}Что открыть?"
 
     # Питание компьютера — всегда с подтверждением
     if R["cancel_power"].search(seg):
@@ -648,12 +654,13 @@ def parse_search(low: str) -> Callable[[], str] | None:
         if named:
             return lambda: execute_tool("open_browser", {"site": named})
     site = detect_site(low)
-    if site is None:
-        m = IN_BROWSER_RE.match(low)
+    if site not in ("youtube", "google"):
+        m = IN_BROWSER_RE.match(low)                  # «открой в браузере астана хаб хакатон» — ищем в Google
         if m:
             query = (m.group("q1") or m.group("q2") or "").strip(PUNCT)
             if query and query not in ("открой", "найди", "поищи"):
                 return lambda: execute_tool("open_browser", {"site": "google", "query": query})
+    if site is None:
         m = BARE_SEARCH_RE.match(low)                 # «найди X» без сайта — ищем в Google
         if m and m.group("query").strip(PUNCT):
             query = m.group("query").strip(PUNCT)
@@ -735,6 +742,15 @@ MUSIC_APP_RE = re.compile(MUSIC_APP)
 PRONOUN_RE = re.compile(r"^(открой|закрой|сверни|разверни|запусти)\s+(?:его|её|ее|него|неё|нее|это|их)$")
 
 
+CLOSE_VERBS = ("закрой", "закрыть", "заверши", "завершить")
+
+
+def _bare_name(segment: str) -> bool:
+    """Сегмент — просто название без глагола: приложение, сайт, папка, «браузер»."""
+    return (segment in APP_ALIASES or segment in FOLDER_ALIASES or exact_site(segment) is not None
+            or segment in ("браузер", "browser"))
+
+
 def parse_all(low: str) -> list[Callable[[], str]] | None:
     """Разбирает всю команду без ИИ. Если хоть одна часть не разобралась — None (всё уйдёт в ИИ)."""
     low = fix_hearing(low)
@@ -761,7 +777,10 @@ def parse_all(low: str) -> list[Callable[[], str]] | None:
         pronoun = PRONOUN_RE.match(segment)             # «открой телеграм, а потом закрой его»
         if pronoun and last_target:
             segment = f"{pronoun.group(1)} {last_target}"
-        action = parse_local(segment)
+        action = None
+        if last_verb in CLOSE_VERBS and _bare_name(segment):   # «закрой браузер и яндекс музыку» — закрыть обе
+            action = parse_local(f"{last_verb} {segment}")
+        action = action or parse_local(segment)
         if action is None and last_verb:                # «открой телеграм и браузер» → «открой браузер»
             action = parse_local(f"{last_verb} {segment}")
         if action is None:
@@ -882,6 +901,14 @@ def _history_messages() -> list[dict]:
     return messages
 
 
+def _last_action() -> str:
+    """Что было сделано по последней команде: «На «закрой телеграм»: закрыла Telegram.»"""
+    if not _history:
+        return f"Я пока ничего не делал{END}, господин."
+    _, user, reply = _history[-1]
+    return f"На «{user}»: {reply.rstrip('.')}."
+
+
 def _say(text: str, user: str | None = None) -> None:
     global _last_reply
     _last_reply = text
@@ -947,6 +974,15 @@ def handle_command(command: str) -> bool:
 
     if REPEAT_RE.match(low):
         speak(_last_reply or "Мне пока нечего повторять, господин.")
+        return True
+
+    if LAST_ACTION_RE.match(low):              # «что ты сделала?» — последнее действие словами
+        speak(_last_action())
+        return True
+
+    if R["cancel_command"].search(low):        # «теле… ничего не закрывай», «забудь» — передумали
+        log("Отмена", low)
+        play_sound("cancel")
         return True
 
     # Всё, что можно разобрать правилами (включая цепочки «тише и пауза»), выполняем без ИИ

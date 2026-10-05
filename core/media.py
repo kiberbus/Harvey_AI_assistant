@@ -51,8 +51,6 @@ from core.apps import (  # noqa: F401
 # приложение, название, исполнителя, играет он или на паузе. Так «музыка стоп» ставит на паузу
 # именно музыку, а результат проверяется. Без пакета winrt — старые медиа-клавиши.
 try:
-    import asyncio
-
     from winrt.windows.media.control import (
         GlobalSystemMediaTransportControlsSessionManager as _SMTCManager,
     )
@@ -62,6 +60,35 @@ except Exception:
     HAS_SMTC = False
 
 _PLAYING, _PAUSED = 4, 5
+_smtc_loop: asyncio.AbstractEventLoop | None = None
+_smtc_lock = threading.Lock()
+
+
+def _smtc_run(coro, timeout: float = 20.0):
+    """Выполняет корутину SMTC в одном постоянном потоке (MTA) со своим циклом asyncio.
+    Раньше каждый вызов шёл через asyncio.run() из главного потока, где comtypes включил STA, —
+    WinRT на каждом шаге бросал RPC_E_WRONG_THREAD (0x8001010e), и faulthandler засорял ими crash.log."""
+    global _smtc_loop
+    with _smtc_lock:
+        if _smtc_loop is None:
+            loop = asyncio.new_event_loop()
+            ready = threading.Event()
+
+            def run() -> None:
+                try:
+                    from winrt.runtime import ApartmentType, init_apartment
+
+                    init_apartment(ApartmentType.MULTI_THREADED)
+                except Exception as e:
+                    log("Медиа", f"не удалось включить MTA для SMTC: {e}")
+                asyncio.set_event_loop(loop)
+                ready.set()
+                loop.run_forever()
+
+            threading.Thread(target=run, name="smtc", daemon=True).start()
+            ready.wait()
+            _smtc_loop = loop
+    return asyncio.run_coroutine_threadsafe(coro, _smtc_loop).result(timeout)
 _MUSIC_SITES_RE = re.compile(MUSIC_SITES, re.IGNORECASE)
 _TARGET_NAMES = {"music": "музыка", "youtube": "ютуб", "video": "видео"}
 _paused_by_me: list[tuple[str, str]] = []     # (приложение, название) — что Харви поставила на паузу последним
@@ -219,6 +246,13 @@ async def _smtc_media(action: str, target: str | None) -> str | None:
         for info in chosen:
             await info["session"].try_pause_async()
         failed = await _wait_status(chosen, _PAUSED)
+        if (len(failed) == 1 and failed[0]["app"] == current_app and _is_browser_session(failed[0])
+                and not _browser_silent()):
+            # Firefox иногда не принимает паузу от Windows, а медиа-клавишу слушается. Она уходит
+            # текущему плееру — это он и есть, и он всё ещё звучит, так что клавиша именно поставит паузу
+            log("Медиа", "браузер не принял паузу — нажимаю медиа-клавишу")
+            press_key(VK_MEDIA_PLAY_PAUSE)
+            failed = await _wait_status(failed, _PAUSED, timeout=2.0)
         done = [i for i in chosen if i not in failed]
         _paused_by_me = [(i["app"], i["title"]) for i in done] or _paused_by_me
         if failed:
@@ -275,7 +309,7 @@ def now_playing() -> str:
     """«Что играет?» — название и исполнитель (или канал на YouTube)."""
     if not HAS_SMTC:
         return f"{FAIL}не вижу плееры, не установлен пакет winrt"
-    return asyncio.run(_now_playing())
+    return _smtc_run(_now_playing())
 
 
 def _media_keys(action: str) -> str:
@@ -326,7 +360,7 @@ def _autoplay_when_ready(target: str, timeout: float = 25.0) -> None:
             return
         how = None
         try:
-            if HAS_SMTC and asyncio.run(via_smtc()):
+            if HAS_SMTC and _smtc_run(via_smtc()):
                 how = "«играть» в Windows"
         except Exception as e:
             log("Медиа", f"SMTC при автозапуске: {e}")
@@ -362,7 +396,7 @@ def media(action: str, target: str | None = None) -> str:
     result = None
     if HAS_SMTC:
         try:
-            result = asyncio.run(_smtc_media(action, target))
+            result = _smtc_run(_smtc_media(action, target))
         except Exception as e:
             log("Медиа", f"SMTC не сработал, использую медиа-клавиши: {e}")
     if result == "":                 # «включи музыку», а включать нечего — открываем приложение / сайт из config.py

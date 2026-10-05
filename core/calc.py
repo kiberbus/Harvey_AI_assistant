@@ -67,6 +67,9 @@ def words_to_digits(text: str) -> str:
         total, group, used, j = 0.0, 0.0, 0, i
         while j < len(tokens):
             value, scale = _word_value(tokens[j]), _scale(tokens[j])
+            if value is None and not used and j + 1 < len(tokens) and _scale(tokens[j + 1]) \
+                    and re.fullmatch(NUM, tokens[j]):
+                value = float(tokens[j])             # «2 миллиона», «2 тысячи триста» — цифра перед словом
             if value is not None:
                 group += value
             elif scale is not None:

@@ -125,7 +125,10 @@ def main() -> None:
         pass
     setup_logging()
     try:      # падение в C-коде (ctypes, CUDA) не оставляет следов в логе — пусть хотя бы стек Python
-        faulthandler.enable(open(BASE_DIR / "crash.log", "a", encoding="utf-8"), all_threads=True)
+        crash_log = BASE_DIR / "crash.log"
+        if crash_log.exists() and crash_log.stat().st_size > LOG_MAX_MB * 1024 * 1024:
+            crash_log.replace(crash_log.with_name("crash.log.1"))     # храним одну прошлую копию
+        faulthandler.enable(open(crash_log, "a", encoding="utf-8"), all_threads=True)
     except Exception:
         pass
     if not _single_instance():
@@ -236,7 +239,9 @@ def main() -> None:
                         (dialog_open or daily._pending is not None or speaking) and not daily._sleeping):
                     continue
 
+                heard_at = time.time()               # фраза закончилась — отсюда считаем задержку
                 text = early.get("text") or transcribe(audio)
+                stt_sec = time.time() - heard_at
                 low = text.lower()
                 if not low or is_noise(low):
                     continue
@@ -321,7 +326,9 @@ def main() -> None:
                         speak_sync("Да, господин?")
                     drain(audio_q)                   # выбросить эхо собственного сигнала
                     cmd_audio = record_command(audio_q, threshold)
+                    heard_at = time.time()
                     command = transcribe(cmd_audio).strip() if cmd_audio is not None else ""
+                    stt_sec = time.time() - heard_at
                     log("Команда", command)
 
                 if not command:
@@ -330,8 +337,11 @@ def main() -> None:
                     else:
                         speak(f"Я ничего не услышал{END}, господин.")
                     continue
+                started = time.time()
                 if not handle_command(command):
                     break
+                # Для отчёта по логу: где теряется время — в распознавании или в выполнении (ИИ)
+                log("Время", f"распознавание {stt_sec:.2f} с, команда {time.time() - started:.2f} с")
                 if DIALOG_MODE and not daily._sleeping:
                     dialog_until = time.time() + DIALOG_TIMEOUT
     finally:

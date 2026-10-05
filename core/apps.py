@@ -31,13 +31,17 @@ from core.winapi import (  # noqa: F401
     KEYEVENTF_KEYUP,
     SW_MAXIMIZE,
     SW_MINIMIZE,
+    SW_RESTORE,
+    VK_CONTROL,
     VK_D,
     VK_LWIN,
     VK_MENU,
     VK_SNAPSHOT,
     VK_TAB,
     WM_CLOSE,
+    WNDENUMPROC,
     _find_procs,
+    _force_foreground,
     _user32,
     _windows_of,
     bring_to_front,
@@ -262,6 +266,11 @@ def _target_exes(query: str) -> set[str]:
     for names, procs in NAME_GROUPS:
         if q in names:
             exes |= {p.lower() for p in procs}
+    if not exes:     # «диспетер задачи», «телеграмма» — ослышка в пару букв
+        aliases = {alias: procs for names, procs in NAME_GROUPS for alias in names}
+        close = difflib.get_close_matches(q, list(aliases), n=1, cutoff=0.8)
+        if close:
+            exes = {p.lower() for p in aliases[close[0]]}
     if exes:
         return exes
 
@@ -369,9 +378,92 @@ def minimize_app(name: str) -> str:
 
 
 def close_app(name: str) -> str:
+    """«Закрой телеграм» — приложение; «закрой загрузки» — окно папки; «закрой ютуб» — вкладку сайта."""
     if psutil is None:
         raise RuntimeError("psutil не установлен")
-    return _close_exes(_target_exes(name), name)
+    folder = _close_folder_window(name)
+    if folder:
+        return folder
+    targets = _target_exes(name)
+    if not _find_procs(targets, set()):
+        tab = _close_site_tab(name)
+        if tab:
+            return tab
+    return _close_exes(targets, name)
+
+
+_VK_W = 0x57
+
+
+def _top_windows() -> list[tuple[int, str, str, int]]:
+    """Видимые окна верхнего уровня: (hwnd, заголовок, класс окна, pid)."""
+    found: list[tuple[int, str, str, int]] = []
+    title, cls = ctypes.create_unicode_buffer(512), ctypes.create_unicode_buffer(128)
+
+    def callback(hwnd, _lparam):
+        if _user32.IsWindowVisible(hwnd) and _user32.GetWindowTextW(hwnd, title, 512):
+            _user32.GetClassNameW(hwnd, cls, 128)
+            pid = wintypes.DWORD()
+            _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            found.append((hwnd, title.value, cls.value, pid.value))
+        return True
+
+    _user32.EnumWindows(WNDENUMPROC(callback), 0)
+    return found
+
+
+def _folder_names(name: str) -> set[str] | None:
+    """Как может называться окно папки: «загрузки» → {загрузки, downloads}. None — это не папка."""
+    low = name.strip().lower()
+    key = FOLDER_ALIASES.get(low) or (low if low in FOLDERS else None)
+    if key is None:
+        return None
+    return ({low, key, Path(FOLDERS[key]).name.lower()}
+            | {alias for alias, k in FOLDER_ALIASES.items() if k == key})
+
+
+def _close_folder_window(name: str) -> str | None:
+    """«Закрой загрузки», «закрой рабочий стол» — окна проводника с этой папкой. None — это не папка."""
+    names = _folder_names(name)
+    if names is None:
+        return None
+    windows = [hwnd for hwnd, title, cls, _ in _top_windows()
+               if cls == "CabinetWClass" and title.strip().lower() in names]
+    if not windows:
+        return f"{INFO}папка «{name}» не открыта"
+    for hwnd in windows:
+        _user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+    return f"закрыл{END} папку {name}"
+
+
+def _site_keywords(name: str) -> set[str]:
+    """По каким словам узнать вкладку сайта в заголовке окна: «ютуб» → {youtube}."""
+    low = name.strip().lower()
+    for site, pattern in SITE_ALIASES.items():
+        if re.fullmatch(pattern, low):
+            host = urllib.parse.urlparse(SITES[site]).hostname or ""
+            return {low, site, host.removeprefix("www.").split(".")[0]}
+    return set()
+
+
+def _close_site_tab(name: str) -> str | None:
+    """«Закрой ютуб»: окно браузера, где открыта вкладка с этим сайтом, — вперёд и Ctrl+W.
+    Заголовок окна показывает только активную вкладку, поэтому закрывается именно она. None — не нашли."""
+    keywords = _site_keywords(name)
+    if not keywords or psutil is None:
+        return None
+    browser_pids = {p.pid for p in psutil.process_iter(["name"]) if (p.info["name"] or "").lower() in BROWSER_EXES}
+    for hwnd, title, _, pid in _top_windows():
+        if pid in browser_pids and any(k in title.lower() for k in keywords):
+            if _user32.IsIconic(hwnd):
+                _user32.ShowWindow(hwnd, SW_RESTORE)
+            _force_foreground(hwnd)
+            time.sleep(0.15)
+            if _user32.GetForegroundWindow() != hwnd:
+                return f"{FAIL}не получилось переключиться на вкладку {name}"
+            _chord(VK_CONTROL, _VK_W)
+            return f"закрыл{END} вкладку {name}"
+    return None
 
 
 def close_active(window_only: bool = False) -> str:

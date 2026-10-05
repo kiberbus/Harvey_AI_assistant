@@ -164,6 +164,22 @@ PHRASE_CASES = [
     ("перезагрузи", [("request_power", {"action": "restart"})]),
     ("какая погода", [("weather", {})]),
     ("закрой телеграм", [("close_app", {"name": "телеграм"})]),
+
+    # ── из отчёта по логу (раньше уходили в ИИ) ──
+    ("закрой диспетер задачи", [("close_app", {"name": "диспетчер задачи"})]),
+    ("закрой, браузер и яндекс музыку", [("close_app", {"name": "браузер"}),
+                                         ("close_app", {"name": "яндекс музыку"})]),
+    ("открой глауд", [("open_app", {"name": "глауд"})]),
+    ("перезапустить", [("restart_self", {})]),
+    ("открой вкладку", [("shortcut", {"action": "new_tab"})]),
+    ("неполный экран", [("shortcut", {"action": "fullscreen"})]),
+    ("полный кран", [("shortcut", {"action": "fullscreen"})]),
+    ("открой stepik в браузере", [("open_browser", {"site": "stepik"})]),
+    ("открой obsidian в браузере", [("open_browser", {"site": "google", "query": "obsidian"})]),
+    ("открой в браузере, астана хаб хакатон", [("open_browser", {"site": "google", "query": "астана хаб хакатон"})]),
+    ("открой астана хаб", [("open_browser", {"site": "astanahub"})]),
+    ("степик", [("open_browser", {"site": "stepik"})]),
+    ("открой", ["=Что открыть?"]),
 ]
 
 
@@ -189,3 +205,25 @@ def test_back_depends_on_window(run, monkeypatch, exe, expected):
     from core import system
     monkeypatch.setattr(system, "foreground_exe", lambda: exe)
     assert run("назад") == expected
+
+
+@pytest.mark.parametrize("phrase", ["теле... ничего не закрывай", "забудь", "ой, не то", "ладно, проехали"])
+def test_cancel_does_nothing(calls, monkeypatch, phrase):
+    """Передумали на полуслове — ничего не выполняем, только звук отмены."""
+    from core import commands
+    sounds = []
+    monkeypatch.setattr(commands, "play_sound", sounds.append)
+    assert commands.handle_command(phrase) is True
+    assert calls == [] and sounds == ["cancel"]
+
+
+def test_what_did_you_do(monkeypatch):
+    from core import commands
+    said = []
+    monkeypatch.setattr(commands, "speak", said.append)
+    monkeypatch.setattr(commands, "_history", commands.deque(maxlen=5))
+    commands.handle_command("что ты сделала")
+    commands._remember("закрой телеграм", "закрыла Telegram")
+    commands.handle_command("а что ты сделала")
+    assert said[0].startswith("Я пока ничего не делал")
+    assert said[1] == "На «закрой телеграм»: закрыла Telegram."

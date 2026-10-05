@@ -10,7 +10,7 @@ notes.txt
 reminders.json
 .duck_state.json
 отчёт по логу.txt
-crash.log
+crash.log*
 
 # Скачанные модели (большие, скачиваются заново сами)
 piper/
