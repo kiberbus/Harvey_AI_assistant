@@ -458,8 +458,8 @@ def parse_local(segment: str) -> Callable[[], str] | None:
         if folder and (m.group(1) or alias in BARE_FOLDERS):
             return lambda: execute_tool("open_folder", {"name": folder})
 
-    # Открыть приложение
-    m = re.match(r"(?:открой|запусти|открыть|запустить)\s+(.+)", seg)
+    # Открыть приложение: «открой телеграм», «включи Claude» (музыку, звук, видео «включи» разобрало раньше)
+    m = re.match(r"(?:открой|запусти|открыть|запустить|включи|вруби)\s+(.+)", seg)
     if m and (m.group(1).strip() in APP_ALIASES or not any(marker in seg for marker in COMPLEX_MARKERS)):
         target = m.group(1).strip()
         if find_app(target):

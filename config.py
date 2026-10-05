@@ -88,6 +88,9 @@ MUSIC_SITES = r"яндекс[\s.]*музык|yandex[\s.]*music|spotify|soundclou
 # Что открыть, если «включи музыку», а включать нечего: сначала приложение (и сразу включить в нём),
 # иначе сайт (ключи — из SITES ниже)
 MEDIA_FALLBACK_APP = {"music": "яндекс музыка"}
+# Яндекс Музыка не видна Windows как плеер, пока в ней ни разу не нажали «играть». Тогда Харви
+# нажимает кнопку прямо в её окне — первую найденную из списка (названия — как их видит Windows)
+MUSIC_APP_PLAY_BUTTONS = ("Воспроизведение", "Воспроизведение Моей волны")
 MEDIA_FALLBACK_SITE = {"youtube": "youtube"}
 BROWSER_EXES = {"firefox.exe", "chrome.exe", "msedge.exe", "opera.exe", "browser.exe", "brave.exe", "vivaldi.exe"}
 

@@ -102,6 +102,8 @@ PHRASE_CASES = [
     ("открой в браузере", [("open_browser", {})]),
     ("открой, пожалуйста, claude", [("open_app", {"name": "claude"})]),
     ("открой клауды", [("open_app", {"name": "клауды"})]),
+    ("включи claude", [("open_app", {"name": "claude"})]),          # из лога: уходило в ИИ и не открывалось
+    ("включи телеграм", [("open_app", {"name": "телеграм"})]),
     ("открой станахаб", [("open_browser", {"site": "astanahub"})]),
     ("переводчик", [("open_browser", {"site": "translate"})]),
     ("браузер, переводчик", [("open_browser", {"site": "translate"})]),

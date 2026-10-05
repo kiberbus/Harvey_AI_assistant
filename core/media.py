@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ctypes
 import re
 import threading
@@ -24,9 +25,12 @@ from core.winapi import (  # noqa: F401
     VK_MEDIA_PLAY_PAUSE,
     VK_MEDIA_PREV,
     WNDENUMPROC,
+    _find_procs,
     _user32,
+    _windows_of,
     press_key,
 )
+from core.uia import press_button
 from core.audio import (  # noqa: F401
     _audio_sessions,
     _ducker,
@@ -295,33 +299,55 @@ def _media_keys(action: str) -> str:
     return f"{FAIL}неизвестное действие {action}"
 
 
-def _autoplay_when_ready(target: str, timeout: float = 20.0) -> None:
-    """После запуска плеера ждём, пока он появится в Windows, и нажимаем «играть»
-    (Яндекс Музыка при запуске восстанавливает последний трек, но сама не играет)."""
-    async def run() -> None:
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            await asyncio.sleep(0.5)
-            sessions, _ = await _smtc_snapshot()
-            titles = _window_titles()
-            for info in sessions:
-                if target in _session_kinds(info, titles) and any(a in info["app"].lower() for a in MUSIC_APPS):
-                    if info["status"] != _PLAYING:
-                        await info["session"].try_play_async()
-                        log("Медиа", f"автозапуск после открытия: «{info['title']}»")
-                    return
-        log("Медиа", "плеер открылся, но так и не появился в Windows — включать нечего")
+def _autoplay_when_ready(target: str, timeout: float = 25.0) -> None:
+    """После открытия плеера включаем музыку. Если он уже виден Windows (SMTC) — нажимаем «играть» там.
+    Яндекс Музыка не видна, пока в ней ни разу не играли, — тогда жмём кнопку «Воспроизведение»
+    прямо в её окне (UI Automation): после этого она появляется в Windows, и дальше всё как обычно."""
+    exes = _target_exes(MEDIA_FALLBACK_APP.get(target, "")) if psutil else set()
 
-    try:
-        asyncio.run(run())
-    except Exception as e:
-        log("Медиа", f"автозапуск не удался: {e}")
+    def sounding() -> bool:
+        """Плеер реально играет — его слышно (статусу сразу после запуска верить нельзя)."""
+        return any(_session_peak(s) > 0.001 for s in _audio_sessions() if _session_name(s).lower() in exes)
+
+    async def via_smtc() -> bool:
+        """Плеер виден Windows — нажимаем «играть» там. False — не виден."""
+        sessions, _ = await _smtc_snapshot()
+        titles = _window_titles()
+        for info in sessions:
+            if target in _session_kinds(info, titles) and any(a in info["app"].lower() for a in MUSIC_APPS):
+                await info["session"].try_play_async()
+                return True
+        return False
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(0.5)
+        if sounding():
+            return
+        how = None
+        try:
+            if HAS_SMTC and asyncio.run(via_smtc()):
+                how = "«играть» в Windows"
+        except Exception as e:
+            log("Медиа", f"SMTC при автозапуске: {e}")
+        if how is None and exes and _windows_of({p.pid for p in _find_procs(exes, set())}):
+            pressed = press_button(exes, MUSIC_APP_PLAY_BUTTONS, timeout=min(8.0, max(1.0, deadline - time.time())))
+            how = f"кнопку «{pressed}» в окне" if pressed else None
+        if how is None:
+            continue
+        # Пока приложение загружается, нажатие может ни к чему не привести — проверяем, зазвучало ли
+        for _ in range(8):
+            time.sleep(0.4)
+            if sounding():
+                log("Медиа", f"автозапуск после открытия: {how}, через {timeout - (deadline - time.time()):.1f} с")
+                return
+    log("Медиа", "плеер открылся, но включить в нём музыку не удалось")
 
 
 def play_app(name: str) -> str:
     """«Открой Яндекс Музыку» — открыть приложение (или показать уже открытое) и сразу включить музыку."""
     opened = open_app(name)
-    if not opened.startswith(FAIL) and HAS_SMTC:
+    if not opened.startswith(FAIL):
         threading.Thread(target=_autoplay_when_ready, args=("music",), daemon=True).start()
     return opened
 
