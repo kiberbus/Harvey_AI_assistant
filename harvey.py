@@ -76,6 +76,7 @@ from core.daily import (  # noqa: F401
     start_reminders,
 )
 from core.stt import (  # noqa: F401
+    collect_name_sample,
     PRE_BUFFER_BLOCKS,
     _get_block,
     _load_whisper,
@@ -242,6 +243,8 @@ def main() -> None:
 
                 m = WAKE_PATTERN.search(low)
                 named = m is not None or heard_name
+                if m and m.start() <= 2:                     # «Харви, …» — сохраняем само имя для обучения модели
+                    collect_name_sample(audio)
                 if m and _wake.enabled and not heard_name:   # Whisper слышит имя, а модель — нет: видно в логе
                     log("Wake", f"модель не узнала имя (уверенность {_wake.last_peak:.2f}, порог {WAKE_THRESHOLD})")
                 if m:

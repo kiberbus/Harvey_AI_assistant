@@ -8,6 +8,7 @@ import os
 import queue
 import sounddevice as sd
 import threading
+import time
 from collections import deque
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from phrases import *     # noqa: F401,F403
 from core.util import (  # noqa: F401
     HALLUCINATIONS,
     PUNCT,
+    WAKE_PATTERN,
     log,
 )
 
@@ -109,6 +111,85 @@ def has_speech(audio: np.ndarray) -> bool:
 
     options = VadOptions(threshold=VAD_THRESHOLD, min_speech_duration_ms=150, speech_pad_ms=100)
     return bool(get_speech_timestamps(audio, options, sampling_rate=SAMPLE_RATE))
+
+
+_collect_lock = threading.Lock()
+
+
+def _save_wav(path: Path, audio: np.ndarray) -> None:
+    import wave
+
+    with wave.open(str(path), "wb") as f:
+        f.setnchannels(1)
+        f.setsampwidth(2)
+        f.setframerate(SAMPLE_RATE)
+        f.writeframes((np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes())
+
+
+def _quietest_point(audio: np.ndarray, lo: float, hi: float) -> int:
+    """Самое тихое место (кадры по 10 мс) между lo и hi секундами — там граница между словами."""
+    a, b = max(0, int(lo * SAMPLE_RATE)), min(len(audio), int(hi * SAMPLE_RATE))
+    frames = (b - a) // 160
+    if frames < 1:
+        return b
+    rms = np.sqrt((audio[a:a + frames * 160].reshape(frames, 160) ** 2).mean(axis=1))
+    return a + int(np.argmin(rms)) * 160 + 80
+
+
+def find_name_span(audio: np.ndarray) -> tuple[float, float, float | None] | None:
+    """Где в записи слово «Харви»: (начало, конец, начало следующего слова или None) в секундах."""
+    head = audio[: int(3 * SAMPLE_RATE)]                   # имя — в начале фразы
+    with _whisper_lock:
+        segments, _ = _whisper_model.transcribe(
+            head, language="ru", beam_size=1, temperature=0.0, initial_prompt=WHISPER_PROMPT,
+            hotwords=WHISPER_HOTWORDS or None, condition_on_previous_text=False, vad_filter=False,
+            word_timestamps=True)
+        words = [w for s in segments for w in (s.words or [])]
+    for i, w in enumerate(words[:3]):
+        if WAKE_PATTERN.search(w.word.lower()):
+            return w.start, w.end, (words[i + 1].start if i + 1 < len(words) else None)
+    return None
+
+
+def collect_name_sample(audio: np.ndarray) -> None:
+    """В фоне вырезает из фразы слово «Харви» и сохраняет в WAKE_SAMPLES_DIR —
+    так копятся ваши настоящие произношения имени для обучения своей модели."""
+    if not WAKE_COLLECT or _whisper_model is None:
+        return
+
+    def work() -> None:
+        if not _collect_lock.acquire(blocking=False):      # одна вырезка за раз
+            return
+        try:
+            WAKE_SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
+            count = sum(1 for _ in WAKE_SAMPLES_DIR.glob("*.wav"))
+            if count >= WAKE_SAMPLES_MAX:
+                return
+            span = find_name_span(audio)
+            if span is None:
+                return
+            name_start, name_end, next_start = span
+            start = max(0, int((name_start - 0.15) * SAMPLE_RATE))  # разметка слов неточна — берём с запасом
+            if next_start is not None and next_start - name_end < 0.3:
+                # следующее слово сразу за именем («Харви громкость») — режем в самой тихой точке между ними,
+                # иначе в образец попадёт начало следующего слова
+                end = _quietest_point(audio, name_end - 0.03, min(next_start + 0.08, name_end + 0.25))
+            else:
+                end = min(len(audio), int((name_end + 0.2) * SAMPLE_RATE))
+            clip = audio[start:end].copy()
+            fade = min(len(clip), int(0.015 * SAMPLE_RATE))           # без щелчка на срезе
+            clip[-fade:] *= np.linspace(1, 0, fade)
+            if not 0.25 <= len(clip) / SAMPLE_RATE <= 1.6:
+                return
+            _save_wav(WAKE_SAMPLES_DIR / f"harvey_{time.strftime('%Y%m%d_%H%M%S')}.wav", clip)
+            if (count + 1) % 10 == 0 or count == 0:
+                log("Wake", f"образцов вашего «Харви» накоплено: {count + 1} (папка {WAKE_SAMPLES_DIR.name})")
+        except Exception as e:
+            log("Wake", f"не удалось сохранить образец имени: {e}")
+        finally:
+            _collect_lock.release()
+
+    threading.Thread(target=work, daemon=True).start()
 
 
 def transcribe(audio: np.ndarray) -> str:

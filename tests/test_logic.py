@@ -264,3 +264,30 @@ def test_sleep_reply_is_just_ok():
         assert util.compose([reply]) == "Хорошо."                      # обычный режим
     finally:
         daily.set_sleeping(False)
+
+
+def test_name_sample_cut_at_gap(monkeypatch, tmp_path):
+    """Имя сразу переходит в команду («Харви громкость»): образец режется в провале между словами."""
+    import time as _time
+
+    import numpy as np
+
+    from core import stt
+    sr = stt.SAMPLE_RATE
+    rng = np.random.default_rng(0)
+    name = rng.standard_normal(int(0.5 * sr)) * 0.3          # «Харви»: 0.1–0.6 с
+    gap = rng.standard_normal(int(0.04 * sr)) * 0.002        # короткий провал 40 мс
+    nxt = rng.standard_normal(int(0.6 * sr)) * 0.3           # «громкость»
+    audio = np.concatenate([np.zeros(int(0.1 * sr)), name, gap, nxt]).astype(np.float32)
+    monkeypatch.setattr(stt, "WAKE_SAMPLES_DIR", tmp_path)
+    monkeypatch.setattr(stt, "_whisper_model", object())
+    monkeypatch.setattr(stt, "find_name_span", lambda a: (0.1, 0.58, 0.62))   # разметка Whisper приблизительна
+    stt.collect_name_sample(audio)
+    _time.sleep(0.05)
+    while stt._collect_lock.locked():
+        _time.sleep(0.02)
+    (saved,) = tmp_path.glob("*.wav")
+    import wave
+    with wave.open(str(saved)) as w:
+        length = w.getnframes() / sr
+    assert 0.6 <= length <= 0.64           # конец — в провале 0.60–0.64 с, без начала следующего слова

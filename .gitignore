@@ -23,3 +23,4 @@ wake/*.tflite
 *.lnk
 .wake_ok
 wake/*.data
+wake/samples/

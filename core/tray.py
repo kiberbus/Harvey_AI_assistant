@@ -88,6 +88,15 @@ def open_log_report() -> None:
     os.startfile(str(path))
 
 
+def _sample_count() -> int:
+    return sum(1 for _ in WAKE_SAMPLES_DIR.glob("*.wav")) if WAKE_SAMPLES_DIR.exists() else 0
+
+
+def _open_samples() -> None:
+    WAKE_SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
+    os.startfile(str(WAKE_SAMPLES_DIR))
+
+
 def start_tray() -> None:
     """Значок у часов: состояние, спать / проснуться, заметки, лог, автозапуск, выход."""
     if not TRAY_ENABLED:
@@ -131,6 +140,8 @@ def start_tray() -> None:
         pystray.MenuItem("Заметки", lambda _i, _t: open_notes()),
         pystray.MenuItem("Лог", lambda _i, _t: os.startfile(str(LOG_FILE)), visible=lambda _i: LOG_ENABLED),
         pystray.MenuItem("Отчёт: что Харви не поняла", lambda _i, _t: open_log_report(), visible=lambda _i: LOG_ENABLED),
+        pystray.MenuItem(lambda _i: f"Образцы «Харви» ({_sample_count()})", lambda _i, _t: _open_samples(),
+                         visible=lambda _i: WAKE_COLLECT),
         pystray.MenuItem("Запускать вместе с Windows", toggle_autostart, checked=lambda _i: autostart_enabled()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Перезапустить (применить изменения)", lambda _i, _t: restart_self()),
