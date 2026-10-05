@@ -738,8 +738,8 @@ PRONOUN_RE = re.compile(r"^(открой|закрой|сверни|развер�
 def parse_all(low: str) -> list[Callable[[], str]] | None:
     """Разбирает всю команду без ИИ. Если хоть одна часть не разобралась — None (всё уйдёт в ИИ)."""
     low = fix_hearing(low)
-    if BACK_OR_PREVIOUS_RE.match(low):                  # «назад» — до медиа: в браузере это страница назад
-        return [parse_local(low)]
+    if BACK_OR_PREVIOUS_RE.match(low) or any(rx.search(low) for _, rx in SHORTCUT_RES):
+        return [parse_local(low)]                       # «назад», «назад в браузере» — до медиа и поиска
     if MUSIC_APP_RE.fullmatch(low):                     # «запусти яндекс музыку» — открыть и сразу включить
         return [lambda: execute_tool("play_app", {"name": MEDIA_FALLBACK_APP["music"]})]
     # «ютуб стоп» — пауза, «ютуб на 30» — громкость, а не поиск; напоминание не режем по «и»

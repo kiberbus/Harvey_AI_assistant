@@ -139,6 +139,15 @@ PHRASE_CASES = [
     ("полный экран", [("shortcut", {"action": "fullscreen"})]),
     ("окно влево", [("shortcut", {"action": "window_left"})]),
     ("перемести окно вправо", [("shortcut", {"action": "window_right"})]),
+    ("окно вверх", [("shortcut", {"action": "window_up"})]),
+    ("окно вниз", [("shortcut", {"action": "window_down"})]),
+    ("страница назад", [("shortcut", {"action": "back"})]),
+    ("предыдущая страница", [("shortcut", {"action": "back"})]),
+    ("назад в браузере", [("shortcut", {"action": "back"})]),
+    ("нажми назад", [("shortcut", {"action": "back"})]),
+    ("следующая страница", [("shortcut", {"action": "forward"})]),
+    ("вперед в складку", [("shortcut", {"action": "next_tab"})]),      # так Whisper слышит «вкладку»
+    ("назад вкладку", [("shortcut", {"action": "prev_tab"})]),
 
     # ── система ──
     ("загрузка процессора", [("system_status", {})]),

@@ -34,7 +34,10 @@ CTRL, SHIFT, ALT, WIN = 0x11, 0x10, 0x12, 0x5B
 TAB, ENTER, ESC, SPACE, BACK, DELETE = 0x09, 0x0D, 0x1B, 0x20, 0x08, 0x2E
 LEFT, UP, RIGHT, DOWN = 0x25, 0x26, 0x27, 0x28
 F5, F11 = 0x74, 0x7A
-_EXTENDED = {LEFT, UP, RIGHT, DOWN, DELETE}       # без этого флага стрелки иногда работают как цифровой блок
+# Клавиши «Назад» / «Вперёд» браузера (как на мультимедийной клавиатуре): понимают все браузеры и Проводник,
+# и в отличие от Alt+← не открывают строку меню, если Alt «проскочит» отдельно
+BROWSER_BACK, BROWSER_FORWARD = 0xA6, 0xA7
+_EXTENDED = {LEFT, UP, RIGHT, DOWN, DELETE, BROWSER_BACK, BROWSER_FORWARD}   # без флага стрелки — цифровой блок
 
 
 def _key(letter: str) -> int:
@@ -68,11 +71,13 @@ SHORTCUT_KEYS: dict[str, tuple[list[tuple[int, ...]], str]] = {
     "next_tab": ([(CTRL, TAB)], f"переключил{END} на следующую вкладку"),
     "prev_tab": ([(CTRL, SHIFT, TAB)], f"переключил{END} на предыдущую вкладку"),
     "refresh": ([(F5,)], f"обновил{END} страницу"),
-    "back": ([(ALT, LEFT)], f"{'вернулась' if FEMALE_VOICE else 'вернулся'} назад"),
-    "forward": ([(ALT, RIGHT)], f"{'перешла' if FEMALE_VOICE else 'перешёл'} вперёд"),
+    "back": ([(BROWSER_BACK,)], f"{'вернулась' if FEMALE_VOICE else 'вернулся'} назад"),
+    "forward": ([(BROWSER_FORWARD,)], f"{'перешла' if FEMALE_VOICE else 'перешёл'} вперёд"),
     "fullscreen": ([(F11,)], f"переключил{END} полный экран"),
     "window_left": ([(WIN, LEFT)], f"прикрепил{END} окно влево"),
     "window_right": ([(WIN, RIGHT)], f"прикрепил{END} окно вправо"),
+    "window_up": ([(WIN, UP)], f"развернул{END} окно"),
+    "window_down": ([(WIN, DOWN)], f"уменьшил{END} окно"),
 }
 
 
