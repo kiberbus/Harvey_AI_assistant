@@ -26,6 +26,7 @@ import os
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")   # до импорта torch и ctranslate2
 
 import faulthandler
+import logging
 import numpy as np
 import os
 import queue
@@ -344,3 +345,8 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    # Обычный выход выгружает CUDA (Whisper, torch), и на этом процесс падает (0xc0000409 в журнале Windows).
+    # Всё нужное уже сделано в main(), поэтому выходим сразу.
+    logging.shutdown()
+    sys.stdout.flush()
+    os._exit(0)

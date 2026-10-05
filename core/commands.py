@@ -91,6 +91,7 @@ from core.media import (  # noqa: F401
     app_volume,
     media,
     now_playing,
+    play_app,
 )
 from core.daily import (  # noqa: F401
     add_note,
@@ -168,6 +169,7 @@ FUNCTIONS: dict[str, Callable[..., str]] = {
     "now_playing": now_playing,
     "restart_self": restart_self,
     "app_volume": app_volume,
+    "play_app": play_app,
     "add_reminder": add_reminder,
     "list_reminders": list_reminders,
     "cancel_reminders": cancel_reminders,
@@ -362,7 +364,7 @@ def parse_local(segment: str) -> Callable[[], str] | None:
 
     # «открой музыку» — приложение для музыки (папка — «открой папку музыка»)
     if re.fullmatch(r"(?:открой|запусти)\s+(?:музыку|музыка|музыкальное приложение)", seg):
-        return lambda: execute_tool("open_app", {"name": MEDIA_FALLBACK_APP["music"]})
+        return lambda: execute_tool("play_app", {"name": MEDIA_FALLBACK_APP["music"]})
 
     # Закрыть приложение
     m = re.match(r"(?:закрой|закрыть|заверши|завершить)\s+(?:приложение\s+|программу\s+)?(.+)$", seg)
@@ -729,6 +731,7 @@ def is_quick_command(text: str, need_name: bool = True, pending: bool = False) -
     return any(R[key].search(body) for key in _QUICK_KEYS)
 
 
+MUSIC_APP_RE = re.compile(MUSIC_APP)
 PRONOUN_RE = re.compile(r"^(открой|закрой|сверни|разверни|запусти)\s+(?:его|её|ее|него|неё|нее|это|их)$")
 
 
@@ -737,6 +740,8 @@ def parse_all(low: str) -> list[Callable[[], str]] | None:
     low = fix_hearing(low)
     if BACK_OR_PREVIOUS_RE.match(low):                  # «назад» — до медиа: в браузере это страница назад
         return [parse_local(low)]
+    if MUSIC_APP_RE.fullmatch(low):                     # «запусти яндекс музыку» — открыть и сразу включить
+        return [lambda: execute_tool("play_app", {"name": MEDIA_FALLBACK_APP["music"]})]
     # «ютуб стоп» — пауза, «ютуб на 30» — громкость, а не поиск; напоминание не режем по «и»
     whole = parse_reminder(low) or parse_app_volume(low) or parse_media(low) or parse_search(low)
     if whole:

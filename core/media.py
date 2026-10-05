@@ -318,6 +318,14 @@ def _autoplay_when_ready(target: str, timeout: float = 20.0) -> None:
         log("Медиа", f"автозапуск не удался: {e}")
 
 
+def play_app(name: str) -> str:
+    """«Открой Яндекс Музыку» — открыть приложение (или показать уже открытое) и сразу включить музыку."""
+    opened = open_app(name)
+    if not opened.startswith(FAIL) and HAS_SMTC:
+        threading.Thread(target=_autoplay_when_ready, args=("music",), daemon=True).start()
+    return opened
+
+
 def media(action: str, target: str | None = None) -> str:
     """Пауза / продолжить / следующий / предыдущий — у нужного плеера.
     target: "music", "youtube", "video" или None (что угодно)."""
