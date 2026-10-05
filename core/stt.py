@@ -9,6 +9,8 @@ import queue
 import sounddevice as sd
 import threading
 from collections import deque
+import subprocess
+import sys
 from pathlib import Path
 from typing import Callable
 
@@ -146,6 +148,48 @@ def is_noise(low: str) -> bool:
 
 
 # ───────────────────────── СЛОВО-АКТИВАТОР (openWakeWord) ─────────────────────────
+_WAKE_OK_FILE = BASE_DIR / ".wake_ok"    # «эту версию модели уже проверяли» — чтобы не проверять при каждом запуске
+
+
+def _wake_data_file() -> Path | None:
+    """Файл с весами, на который ссылается модель (новый PyTorch кладёт веса рядом: harvey.onnx.data)."""
+    data = WAKE_MODEL.read_bytes()
+    i = data.find(b"location\x12")                 # запись external_data: key="location", value=<имя файла>
+    if i < 0:
+        return None
+    length = data[i + 9]
+    return WAKE_MODEL.parent / data[i + 10:i + 10 + length].decode("utf-8", "replace")
+
+
+def _check_wake_model() -> str | None:
+    """Проверяет модель имени ДО загрузки. Битая модель роняет onnxruntime вместе со всей программой
+    (это не исключение, его не поймать), поэтому пробная загрузка идёт в отдельном процессе.
+    None — всё хорошо, иначе — понятная причина."""
+    data_file = _wake_data_file()
+    if data_file is not None and not data_file.exists():
+        return (f"у модели {WAKE_MODEL.name} нет файла с весами {data_file.name} — "
+                f"скопируйте его из результатов обучения в папку {WAKE_MODEL.parent.name}")
+    files = [WAKE_MODEL] + ([data_file] if data_file else [])
+    key = ";".join(f"{f.name}:{f.stat().st_size}:{f.stat().st_mtime_ns}" for f in files)
+    try:
+        if _WAKE_OK_FILE.read_text(encoding="utf-8") == key:
+            return None
+    except OSError:
+        pass
+    code = ("import sys\nfrom openwakeword.model import Model\n"
+            "Model(wakeword_models=[sys.argv[1]], inference_framework='onnx')\nprint('ok')")
+    try:
+        result = subprocess.run([sys.executable, "-c", code, str(WAKE_MODEL)], capture_output=True, text=True,
+                                timeout=90, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception as e:
+        return f"не удалось проверить {WAKE_MODEL.name}: {e}"
+    if result.returncode != 0 or "ok" not in result.stdout:
+        tail = (result.stderr or "").strip().splitlines()[-1:] or [f"код {result.returncode}"]
+        return f"модель {WAKE_MODEL.name} не загружается ({tail[0][:150]})"
+    _WAKE_OK_FILE.write_text(key, encoding="utf-8")
+    return None
+
+
 class WakeDetector:
     """Маленькая нейросеть слушает имя на каждом блоке звука (~2 мс на 0.1 с).
     Whisper запускается, только если имя прозвучало, — остальное время видеокарта отдыхает,
@@ -154,6 +198,7 @@ class WakeDetector:
     def __init__(self) -> None:
         self._model = None
         self._hit = False
+        self._peak = 0.0             # наибольшая уверенность в имени с прошлой проверки — для подбора порога
 
     @property
     def enabled(self) -> bool:
@@ -163,6 +208,10 @@ class WakeDetector:
         if not WAKE_MODEL.exists():
             log("Wake", f"модели {WAKE_MODEL.name} нет — имя ищет Whisper (как раньше). "
                         f"Как обучить свою — см. папку {WAKE_MODEL.parent.name}")
+            return
+        problem = _check_wake_model()
+        if problem:
+            log("Wake", f"{problem} — имя ищет Whisper, как раньше")
             return
         try:
             from openwakeword.model import Model
@@ -177,7 +226,9 @@ class WakeDetector:
             return
         try:
             scores = self._model.predict((np.clip(block, -1, 1) * 32767).astype(np.int16))
-            if max(scores.values(), default=0) >= WAKE_THRESHOLD:
+            score = float(max(scores.values(), default=0))
+            self._peak = max(self._peak, score)
+            if score >= WAKE_THRESHOLD:
                 self._hit = True
         except Exception as e:
             log("Wake", f"ошибка: {e} — отключаю, имя будет искать Whisper")
@@ -190,6 +241,9 @@ class WakeDetector:
     def take(self) -> bool:
         """Звучало ли имя с прошлой проверки (флаг сбрасывается)."""
         hit, self._hit = self._hit, False
+        if self._peak >= 0.1:              # похоже на имя хоть немного — пишем, чтобы подобрать WAKE_THRESHOLD
+            log("Wake", f"уверенность в имени {self._peak:.2f} (порог {WAKE_THRESHOLD}) — {'услышала' if hit else 'мимо'}")
+        self._peak = 0.0
         return hit
 
 
