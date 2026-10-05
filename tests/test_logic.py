@@ -291,3 +291,32 @@ def test_name_sample_cut_at_gap(monkeypatch, tmp_path):
     with wave.open(str(saved)) as w:
         length = w.getnframes() / sr
     assert 0.6 <= length <= 0.64           # конец — в провале 0.60–0.64 с, без начала следующего слова
+
+
+def _harvey_like(sr, pause_after: float):
+    """Огибающая как у живого «Харви,»: тихое «Х», громкое «а», провал «р», «в», затухающее «и»."""
+    import numpy as np
+    rng = np.random.default_rng(1)
+    parts = [(0.10, 0.0), (0.08, 0.03), (0.15, 0.30), (0.04, 0.08), (0.06, 0.12), (0.15, 0.20),
+             (pause_after, 0.002), (0.40, 0.30)]           # … пауза, следующее слово
+    out = [rng.standard_normal(int(d * sr)) * a for d, a in parts]
+    return np.concatenate(out).astype(np.float32)          # имя по-настоящему кончается на 0.58 с
+
+
+@pytest.mark.parametrize("pause", [0.15, 0.06])
+def test_cut_name_keeps_vi_when_whisper_marks_end_early(pause):
+    from core import stt
+    sr = stt.SAMPLE_RATE
+    audio = _harvey_like(sr, pause)
+    clip = stt.cut_name(audio, 0.10, 0.38, 0.45)            # Whisper: конец 0.38 (на 0.2 с раньше), следующее — 0.45
+    assert clip is not None
+    end = 0.0 + len(clip) / sr                              # начало образца — 0 (0.10 − 0.2 → 0)
+    assert 0.58 <= end <= 0.58 + pause + 0.04               # «-ви» целиком, без следующего слова
+
+
+def test_cut_name_without_pause_cuts_late_not_early():
+    from core import stt
+    sr = stt.SAMPLE_RATE
+    audio = _harvey_like(sr, 0.0)                           # имя вплотную переходит в команду
+    clip = stt.cut_name(audio, 0.10, 0.50, 0.55)
+    assert clip is not None and len(clip) / sr >= 0.58      # конец имени не потерян

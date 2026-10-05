@@ -136,6 +136,40 @@ def _quietest_point(audio: np.ndarray, lo: float, hi: float) -> int:
     return a + int(np.argmin(rms)) * 160 + 80
 
 
+def cut_name(audio: np.ndarray, name_start: float, name_end: float, next_start: float | None) -> np.ndarray | None:
+    """Вырезает имя. Разметка Whisper на живой речи ставит конец «Харви» РАНЬШЕ настоящего — тогда
+    отрезалось «-ви». Поэтому конец ищем по самому звуку: от отметки Whisper вперёд до первой
+    настоящей тишины (≥ 40 мс). Нет тишины (имя вплотную переходит в команду) — режем позже,
+    а не раньше: лучше захватить кусочек следующего слова, чем потерять конец имени."""
+    hop = 160                                                        # 10 мс
+    frames = len(audio) // hop
+    if frames < 10:
+        return None
+    env = np.sqrt((audio[:frames * hop].reshape(frames, hop) ** 2).mean(axis=1))
+    first = int(name_start * SAMPLE_RATE / hop)
+    anchor = int(name_end * SAMPLE_RATE / hop)
+    voice = env[max(0, first):max(first + 1, anchor + 1)]
+    floor = float(np.percentile(env, 10))
+    quiet = max(floor * 2.5, float(voice.max(initial=0)) * 0.12)       # «тишина» относительно громкости имени
+    limit = min(frames, anchor + 50)                                 # ищем не дальше 0.5 с после отметки
+    end = None
+    run = 0
+    for i in range(anchor, limit):
+        run = run + 1 if env[i] < quiet else 0
+        if run >= 4:                                                 # 40 мс тишины — имя закончилось
+            end = (i - run + 1) * hop + int(0.03 * SAMPLE_RATE)      # плюс 30 мс «хвоста»
+            break
+    if end is None:                                                  # паузы нет — режем позже отметки Whisper
+        lo = name_end + 0.08
+        hi = (next_start + 0.2) if next_start is not None else name_end + 0.3
+        end = _quietest_point(audio, lo, max(hi, lo + 0.1))
+    start = max(0, int((name_start - 0.2) * SAMPLE_RATE))            # «Х» тихий — начало берём с запасом
+    clip = audio[start:min(end, len(audio))].copy()
+    fade = min(len(clip), int(0.015 * SAMPLE_RATE))                  # без щелчка на срезе
+    clip[-fade:] *= np.linspace(1, 0, fade)
+    return clip if 0.25 <= len(clip) / SAMPLE_RATE <= 1.6 else None
+
+
 def find_name_span(audio: np.ndarray) -> tuple[float, float, float | None] | None:
     """Где в записи слово «Харви»: (начало, конец, начало следующего слова или None) в секундах."""
     head = audio[: int(3 * SAMPLE_RATE)]                   # имя — в начале фразы
@@ -168,20 +202,14 @@ def collect_name_sample(audio: np.ndarray) -> None:
             span = find_name_span(audio)
             if span is None:
                 return
-            name_start, name_end, next_start = span
-            start = max(0, int((name_start - 0.15) * SAMPLE_RATE))  # разметка слов неточна — берём с запасом
-            if next_start is not None and next_start - name_end < 0.3:
-                # следующее слово сразу за именем («Харви громкость») — режем в самой тихой точке между ними,
-                # иначе в образец попадёт начало следующего слова
-                end = _quietest_point(audio, name_end - 0.03, min(next_start + 0.08, name_end + 0.25))
-            else:
-                end = min(len(audio), int((name_end + 0.2) * SAMPLE_RATE))
-            clip = audio[start:end].copy()
-            fade = min(len(clip), int(0.015 * SAMPLE_RATE))           # без щелчка на срезе
-            clip[-fade:] *= np.linspace(1, 0, fade)
-            if not 0.25 <= len(clip) / SAMPLE_RATE <= 1.6:
+            stamp = time.strftime('%Y%m%d_%H%M%S')
+            raw_dir = WAKE_SAMPLES_DIR / "_полные фразы"             # чтобы можно было перерезать образцы заново
+            raw_dir.mkdir(exist_ok=True)
+            _save_wav(raw_dir / f"harvey_{stamp}.wav", audio[: int(3 * SAMPLE_RATE)])
+            clip = cut_name(audio, *span)
+            if clip is None:
                 return
-            _save_wav(WAKE_SAMPLES_DIR / f"harvey_{time.strftime('%Y%m%d_%H%M%S')}.wav", clip)
+            _save_wav(WAKE_SAMPLES_DIR / f"harvey_{stamp}.wav", clip)
             if (count + 1) % 10 == 0 or count == 0:
                 log("Wake", f"образцов вашего «Харви» накоплено: {count + 1} (папка {WAKE_SAMPLES_DIR.name})")
         except Exception as e:
