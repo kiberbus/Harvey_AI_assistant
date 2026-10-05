@@ -826,14 +826,28 @@ def run_llm(user_text: str) -> None:
     _remember(user_text, _last_reply)
 
 
-def _warmup_llm() -> None:
-    """Загружаем модель в VRAM заранее, чтобы первая команда не ждала холодного старта."""
-    try:
-        ollama.chat(model=MODEL, messages=[{"role": "user", "content": "ок"}],
-                    options={"num_predict": 1, "num_ctx": NUM_CTX}, keep_alive=KEEP_ALIVE)
-        log("LLM", "модель прогрета.")
-    except Exception as e:
-        log("LLM", f"не удалось прогреть модель: {e}")
+def _warmup_llm(wait_sec: float = 180.0) -> None:
+    """Загружаем модель в VRAM заранее, чтобы первая команда не ждала холодного старта.
+    При входе в Windows Харви и Ollama стартуют одновременно — ждём, пока Ollama поднимется."""
+    deadline = time.time() + wait_sec
+    waited = False
+    while True:
+        try:
+            ollama.chat(model=MODEL, messages=[{"role": "user", "content": "ок"}],
+                        options={"num_predict": 1, "num_ctx": NUM_CTX}, keep_alive=KEEP_ALIVE)
+            log("LLM", "модель прогрета." + (" (дождалась запуска Ollama)" if waited else ""))
+            return
+        except ollama.ResponseError as e:          # Ollama работает, но ответил ошибкой (нет модели и т.п.)
+            log("LLM", f"не удалось прогреть модель: {e}")
+            return
+        except Exception as e:                     # Ollama ещё не запущен — подождём
+            if time.time() > deadline:
+                log("LLM", f"Ollama так и не ответил за {wait_sec:.0f} с: {e}")
+                return
+            if not waited:
+                log("LLM", "Ollama ещё не запущен — жду...")
+                waited = True
+            time.sleep(3)
 
 
 def unload_model() -> None:

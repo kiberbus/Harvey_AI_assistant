@@ -230,7 +230,7 @@ def main() -> None:
                     continue
                 # Детектор имени включён: без имени Whisper нужен только в диалоге, при «да/нет»
                 # и чтобы услышать «стоп», пока Харви говорит
-                if _wake.enabled and not heard_name and not (
+                if _wake.enabled and WAKE_GATE and not heard_name and not (
                         (dialog_open or daily._pending is not None or speaking) and not daily._sleeping):
                     continue
 
@@ -242,6 +242,8 @@ def main() -> None:
 
                 m = WAKE_PATTERN.search(low)
                 named = m is not None or heard_name
+                if m and _wake.enabled and not heard_name:   # Whisper слышит имя, а модель — нет: видно в логе
+                    log("Wake", f"модель не узнала имя (уверенность {_wake.last_peak:.2f}, порог {WAKE_THRESHOLD})")
                 if m:
                     after_name = text[m.end():]
                 elif heard_name:                    # имя услышала нейросеть, Whisper записал его иначе

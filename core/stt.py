@@ -199,6 +199,7 @@ class WakeDetector:
         self._model = None
         self._hit = False
         self._peak = 0.0             # наибольшая уверенность в имени с прошлой проверки — для подбора порога
+        self.last_peak = 0.0         # то же для последней фразы (после take)
 
     @property
     def enabled(self) -> bool:
@@ -243,7 +244,7 @@ class WakeDetector:
         hit, self._hit = self._hit, False
         if self._peak >= 0.1:              # похоже на имя хоть немного — пишем, чтобы подобрать WAKE_THRESHOLD
             log("Wake", f"уверенность в имени {self._peak:.2f} (порог {WAKE_THRESHOLD}) — {'услышала' if hit else 'мимо'}")
-        self._peak = 0.0
+        self.last_peak, self._peak = self._peak, 0.0
         return hit
 
 
