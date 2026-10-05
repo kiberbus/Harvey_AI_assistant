@@ -126,69 +126,43 @@ def _save_wav(path: Path, audio: np.ndarray) -> None:
         f.writeframes((np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes())
 
 
-def _quietest_point(audio: np.ndarray, lo: float, hi: float) -> int:
-    """Самое тихое место (кадры по 10 мс) между lo и hi секундами — там граница между словами."""
-    a, b = max(0, int(lo * SAMPLE_RATE)), min(len(audio), int(hi * SAMPLE_RATE))
-    frames = (b - a) // 160
-    if frames < 1:
-        return b
-    rms = np.sqrt((audio[a:a + frames * 160].reshape(frames, 160) ** 2).mean(axis=1))
-    return a + int(np.argmin(rms)) * 160 + 80
-
-
-def cut_name(audio: np.ndarray, name_start: float, name_end: float, next_start: float | None) -> np.ndarray | None:
-    """Вырезает имя. Разметка Whisper на живой речи ставит конец «Харви» РАНЬШЕ настоящего — тогда
-    отрезалось «-ви». Поэтому конец ищем по самому звуку: от отметки Whisper вперёд до первой
-    настоящей тишины (≥ 40 мс). Нет тишины (имя вплотную переходит в команду) — режем позже,
-    а не раньше: лучше захватить кусочек следующего слова, чем потерять конец имени."""
+def cut_name(audio: np.ndarray) -> np.ndarray | None:
+    """Вырезает имя из фразы «Харви, …» по громкости, без Whisper: имя — первый «островок» звука,
+    после которого идёт пауза. Паузы нет (имя слито с командой) — None: лучше меньше образцов, но чистых.
+    По краям — запас тишины: без него плеер Windows не успевает доиграть конец короткого файла,
+    и кажется, что «-ви» обрезано."""
     hop = 160                                                        # 10 мс
     frames = len(audio) // hop
-    if frames < 10:
+    if frames < 20:
         return None
     env = np.sqrt((audio[:frames * hop].reshape(frames, hop) ** 2).mean(axis=1))
-    first = int(name_start * SAMPLE_RATE / hop)
-    anchor = int(name_end * SAMPLE_RATE / hop)
-    voice = env[max(0, first):max(first + 1, anchor + 1)]
-    floor = float(np.percentile(env, 10))
-    quiet = max(floor * 2.5, float(voice.max(initial=0)) * 0.12)       # «тишина» относительно громкости имени
-    limit = min(frames, anchor + 50)                                 # ищем не дальше 0.5 с после отметки
-    end = None
+    quiet = max(float(np.percentile(env, 10)) * 3, float(env.max()) * 0.06)
+    loud = env > quiet
+    first = next((i for i in range(frames - 3) if loud[i:i + 3].all()), None)   # начало речи: 30 мс подряд
+    if first is None:
+        return None
+    last = None
     run = 0
-    for i in range(anchor, limit):
-        run = run + 1 if env[i] < quiet else 0
-        if run >= 4:                                                 # 40 мс тишины — имя закончилось
-            end = (i - run + 1) * hop + int(0.03 * SAMPLE_RATE)      # плюс 30 мс «хвоста»
+    for i in range(first, min(frames, first + 100)):                # имя ищем в первую секунду речи
+        run = run + 1 if not loud[i] else 0
+        if run >= 6 and i - run + 1 - first >= 15:                    # 60 мс тишины после ≥150 мс звука
+            last = i - run + 1
             break
-    if end is None:                                                  # паузы нет — режем позже отметки Whisper
-        lo = name_end + 0.08
-        hi = (next_start + 0.2) if next_start is not None else name_end + 0.3
-        end = _quietest_point(audio, lo, max(hi, lo + 0.1))
-    start = max(0, int((name_start - 0.2) * SAMPLE_RATE))            # «Х» тихий — начало берём с запасом
-    clip = audio[start:min(end, len(audio))].copy()
-    fade = min(len(clip), int(0.015 * SAMPLE_RATE))                  # без щелчка на срезе
-    clip[-fade:] *= np.linspace(1, 0, fade)
-    return clip if 0.25 <= len(clip) / SAMPLE_RATE <= 1.6 else None
-
-
-def find_name_span(audio: np.ndarray) -> tuple[float, float, float | None] | None:
-    """Где в записи слово «Харви»: (начало, конец, начало следующего слова или None) в секундах."""
-    head = audio[: int(3 * SAMPLE_RATE)]                   # имя — в начале фразы
-    with _whisper_lock:
-        segments, _ = _whisper_model.transcribe(
-            head, language="ru", beam_size=1, temperature=0.0, initial_prompt=WHISPER_PROMPT,
-            hotwords=WHISPER_HOTWORDS or None, condition_on_previous_text=False, vad_filter=False,
-            word_timestamps=True)
-        words = [w for s in segments for w in (s.words or [])]
-    for i, w in enumerate(words[:3]):
-        if WAKE_PATTERN.search(w.word.lower()):
-            return w.start, w.end, (words[i + 1].start if i + 1 < len(words) else None)
-    return None
+    if last is None:
+        return None
+    voiced = (last - first) * hop / SAMPLE_RATE
+    if not 0.15 <= voiced <= 0.7:                                    # длиннее — скорее «Харви открой» без паузы
+        return None
+    start = max(0, (first - 12) * hop)                               # «Х» тихий — 120 мс запаса перед речью
+    clip = audio[start:min(len(audio), (last + 6) * hop)].copy()     # и 60 мс после (там уже тишина)
+    pad = np.zeros(int(0.3 * SAMPLE_RATE), dtype=np.float32)          # 0.3 с тишины — чтобы плеер доиграл
+    return np.concatenate([clip, pad])
 
 
 def collect_name_sample(audio: np.ndarray) -> None:
-    """В фоне вырезает из фразы слово «Харви» и сохраняет в WAKE_SAMPLES_DIR —
-    так копятся ваши настоящие произношения имени для обучения своей модели."""
-    if not WAKE_COLLECT or _whisper_model is None:
+    """В фоне вырезает из фразы «Харви, …» само имя и сохраняет в WAKE_SAMPLES_DIR —
+    так копятся ваши настоящие произношения имени для обучения своей модели. Видеокарту не трогает."""
+    if not WAKE_COLLECT:
         return
 
     def work() -> None:
@@ -199,17 +173,10 @@ def collect_name_sample(audio: np.ndarray) -> None:
             count = sum(1 for _ in WAKE_SAMPLES_DIR.glob("*.wav"))
             if count >= WAKE_SAMPLES_MAX:
                 return
-            span = find_name_span(audio)
-            if span is None:
-                return
-            stamp = time.strftime('%Y%m%d_%H%M%S')
-            raw_dir = WAKE_SAMPLES_DIR / "_полные фразы"             # чтобы можно было перерезать образцы заново
-            raw_dir.mkdir(exist_ok=True)
-            _save_wav(raw_dir / f"harvey_{stamp}.wav", audio[: int(3 * SAMPLE_RATE)])
-            clip = cut_name(audio, *span)
+            clip = cut_name(audio)
             if clip is None:
                 return
-            _save_wav(WAKE_SAMPLES_DIR / f"harvey_{stamp}.wav", clip)
+            _save_wav(WAKE_SAMPLES_DIR / f"harvey_{time.strftime('%Y%m%d_%H%M%S')}.wav", clip)
             if (count + 1) % 10 == 0 or count == 0:
                 log("Wake", f"образцов вашего «Харви» накоплено: {count + 1} (папка {WAKE_SAMPLES_DIR.name})")
         except Exception as e:
