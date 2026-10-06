@@ -108,6 +108,12 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if R["sleep_mode"].search(seg):
         return lambda: tools.execute_tool("sleep_mode", {})
 
+    # Лайки в Яндекс Музыке раньше клавиш и медиа: «сохрани эту песню» - не Ctrl+S.
+    # Дизлайк и «убери лайк» раньше лайка, в них тоже есть «лайк»
+    for key, action in (("track_dislike", "dislike"), ("track_unlike", "unlike"), ("track_like", "like")):
+        if R[key].search(seg):
+            return lambda a=action: tools.execute_tool("rate_track", {"action": a})
+
     # Клавиши. Должны идти раньше "закрой X", медиа и "открой X"
     for action, rx in SHORTCUT_RES:
         if rx.search(seg):
@@ -510,7 +516,7 @@ def fix_hearing(low: str) -> str:
 # После этих команд продолжения не бывает, их можно выполнять после короткой паузы
 _QUICK_KEYS = ("time", "date", "weekday", "datefull", "sleep_mode", "now_playing", "mute", "unmute",
                "media_next", "media_prev", "media_pause", "media_play",
-               "volume_up", "volume_down", "bright_up", "bright_down")
+               "track_like", "track_unlike", "track_dislike", "volume_up", "volume_down", "bright_up", "bright_down")
 
 
 def is_quick_command(text: str, need_name: bool = True, pending: bool = False) -> bool:

@@ -27,6 +27,32 @@ PHRASE_CASES = [
     ("что за песня", [("now_playing", {})]),
     ("кто поёт", [("now_playing", {})]),
 
+    # лайки в Яндекс Музыке
+    ("поставь лайк", [("rate_track", {"action": "like"})]),
+    ("лайк", [("rate_track", {"action": "like"})]),
+    ("лайкни", [("rate_track", {"action": "like"})]),
+    ("лайкни эту песню", [("rate_track", {"action": "like"})]),
+    ("залайкай трек", [("rate_track", {"action": "like"})]),
+    ("поставь лайк этой песне", [("rate_track", {"action": "like"})]),
+    ("поставь сердечко", [("rate_track", {"action": "like"})]),
+    ("добавь в нравится", [("rate_track", {"action": "like"})]),
+    ("добавь песню в нравится", [("rate_track", {"action": "like"})]),
+    ("добавь эту песню в мне нравится", [("rate_track", {"action": "like"})]),
+    ("добавь этот трек в любимые", [("rate_track", {"action": "like"})]),
+    ("сохрани в избранное", [("rate_track", {"action": "like"})]),
+    ("сохрани эту песню", [("rate_track", {"action": "like"})]),
+    ("мне нравится эта песня", [("rate_track", {"action": "like"})]),
+    ("эта песня мне очень нравится", [("rate_track", {"action": "like"})]),
+    ("в избранное", [("rate_track", {"action": "like"})]),
+    ("убери лайк", [("rate_track", {"action": "unlike"})]),
+    ("сними лайк", [("rate_track", {"action": "unlike"})]),
+    ("убери эту песню из нравится", [("rate_track", {"action": "unlike"})]),
+    ("удали из избранного", [("rate_track", {"action": "unlike"})]),
+    ("дизлайк", [("rate_track", {"action": "dislike"})]),
+    ("поставь дизлайк", [("rate_track", {"action": "dislike"})]),
+    ("мне не нравится эта песня", [("rate_track", {"action": "dislike"})]),
+    ("лайкни и следующий трек", [("rate_track", {"action": "like"}), (M, {"action": "next", "target": "music"})]),
+
     # то, что НЕ должно стать медиа
     ("включи звук", [("mute", {"state": False})]),
     ("выключи звук", [("mute", {"state": True})]),
@@ -190,6 +216,8 @@ def test_phrase(run, phrase, expected):
 @pytest.mark.parametrize("phrase", [
     "что думаешь о жизни",
     "я хочу спать",              # обычный разговор не должен усыплять
+    "мне нравится твой голос",   # и ставить лайки
+    "сколько лайков у этого видео",
 ])
 def test_goes_to_llm(run, phrase):
     assert run(phrase) is None

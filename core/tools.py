@@ -39,6 +39,7 @@ from core.media import (  # noqa: F401
     media,
     now_playing,
     play_app,
+    rate_track,
 )
 from core.daily import (  # noqa: F401
     add_note,
@@ -98,6 +99,7 @@ FUNCTIONS: dict[str, Callable[..., str]] = {
     "mute": mute,
     "media": media,
     "now_playing": now_playing,
+    "rate_track": rate_track,
     "restart_self": restart_self,
     "app_volume": app_volume,
     "play_app": play_app,
@@ -152,6 +154,8 @@ TOOLS = [
                       "description": "Чем управлять; не указывай, если пользователь не уточнил"}},
           ["action"]),
     _tool("now_playing", "Сказать, что сейчас играет: название и исполнителя.", {}, []),
+    _tool("rate_track", "Лайк текущей песне в Яндекс Музыке (добавить в «Мне нравится»), снять лайк или дизлайк.",
+          {"action": {"type": "string", "enum": ["like", "unlike", "dislike"]}}, ["action"]),
     _tool("app_volume", "Громкость одного приложения (не общая): музыки, ютуба, видео или программы по названию.",
           {"target": {"type": "string", "description": "music, youtube, video или название приложения"},
            "level": _PERCENT, "delta": _DELTA}, ["target"]),

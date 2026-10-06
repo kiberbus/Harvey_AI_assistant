@@ -85,6 +85,9 @@ MEDIA_FALLBACK_APP = {"music": "яндекс музыка"}
 # Яндекс Музыку Windows не видит как плеер, пока в ней ни разу не нажали play,
 # поэтому жму кнопку в окне через UI Automation. Названия кнопок - как их видит Windows
 MUSIC_APP_PLAY_BUTTONS = ("Воспроизведение", "Воспроизведение Моей волны")
+# Кнопки-переключатели в панели плеера Яндекс Музыки: лайк («в Нравится») и дизлайк
+MUSIC_APP_LIKE_BUTTON = "Нравится"
+MUSIC_APP_DISLIKE_BUTTON = "Не нравится"
 MEDIA_FALLBACK_SITE = {"youtube": "youtube"}
 BROWSER_EXES = {"firefox.exe", "chrome.exe", "msedge.exe", "opera.exe", "browser.exe", "brave.exe", "vivaldi.exe"}
 

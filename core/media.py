@@ -15,6 +15,8 @@ from config import (
     MEDIA_FALLBACK_APP,
     MEDIA_FALLBACK_SITE,
     MUSIC_APPS,
+    MUSIC_APP_DISLIKE_BUTTON,
+    MUSIC_APP_LIKE_BUTTON,
     MUSIC_APP_PLAY_BUTTONS,
     MUSIC_SITES,
     VIDEO_APPS,
@@ -38,7 +40,7 @@ from core.winapi import (  # noqa: F401
     _windows_of,
     press_key,
 )
-from core.uia import press_button
+from core.uia import press_button, toggle_button
 from core.audio import (  # noqa: F401
     _audio_sessions,
     _ducker,
@@ -377,6 +379,46 @@ def _autoplay_when_ready(target: str, timeout: float = 25.0) -> None:
                 log("Медиа", f"автозапуск после открытия: {how}, через {timeout - (deadline - time.time()):.1f} с")
                 return
     log("Медиа", "плеер открылся, но включить в нём музыку не удалось")
+
+
+def _music_app_track() -> str:
+    """Название трека в музыкальном приложении - чтобы сказать, что именно лайкнула."""
+    async def title() -> str:
+        sessions, _ = await _smtc_snapshot()
+        found = [i for i in sessions if i["title"] and any(a in i["app"].lower() for a in MUSIC_APPS)]
+        return found[0]["title"] if found else ""
+    try:
+        return _smtc_run(title(), timeout=5.0) if HAS_SMTC else ""
+    except Exception:
+        return ""
+
+
+# действие: (кнопка, положение, «сделала», «уже так»)
+_RATE = {
+    "like": (MUSIC_APP_LIKE_BUTTON, True, "добавил{end} {track} в «Нравится»", "{track} уже в «Нравится»"),
+    "unlike": (MUSIC_APP_LIKE_BUTTON, False, "убрал{end} {track} из «Нравится»", "{track} и так не в «Нравится»"),
+    "dislike": (MUSIC_APP_DISLIKE_BUTTON, True, "поставил{end} дизлайк на {track}", "на {track} дизлайк уже стоит"),
+}
+
+
+def rate_track(action: str = "like") -> str:
+    """Лайк, снятие лайка или дизлайк текущему треку в Яндекс Музыке («поставь лайк»).
+    Нажимает кнопку в окне приложения, поэтому трек сохраняется в «Мне нравится» в аккаунте."""
+    action = (action or "like").strip().lower()
+    if action not in _RATE:
+        action = "like"
+    button, state, done_text, same_text = _RATE[action]
+    exes = _target_exes(MEDIA_FALLBACK_APP["music"]) if psutil else set()
+    if not exes or not _windows_of({p.pid for p in _find_procs(exes, set())}):
+        return f"{FAIL}Яндекс Музыка не открыта"
+    pressed = toggle_button(exes, button, state)
+    if pressed is None:
+        return f"{FAIL}не нашл{'а' if FEMALE_VOICE else 'ёл'} кнопку «{button}», похоже, трек не выбран"
+    title = _music_app_track()
+    track = f"«{title}»" if title else "трек"
+    if pressed:
+        return done_text.format(end=END, track=track)
+    return INFO + same_text.format(track=track)
 
 
 def play_app(name: str) -> str:
