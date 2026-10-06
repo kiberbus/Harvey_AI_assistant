@@ -173,6 +173,15 @@ PHRASE_CASES = [
     ("перемести окно вправо", [("shortcut", {"action": "window_right"})]),
     ("окно вверх", [("shortcut", {"action": "window_up"})]),
     ("окно вниз", [("shortcut", {"action": "window_down"})]),
+    ("окно на второй монитор", [("shortcut", {"action": "window_monitor"})]),
+    ("перенеси окно на другой экран", [("shortcut", {"action": "window_monitor"})]),
+    ("телеграм влево", [("arrange_window", {"position": "left", "name": "телеграм"})]),
+    ("перемести телеграм вправо", [("arrange_window", {"position": "right", "name": "телеграм"})]),
+    ("хром на второй монитор", [("arrange_window", {"position": "monitor", "name": "хром"})]),
+    ("рядом хром и телеграм", [("side_by_side", {"left": "хром", "right": "телеграм"})]),
+    ("рядом chrome и telegram", [("side_by_side", {"left": "chrome", "right": "telegram"})]),
+    ("поставь телеграм и блокнот рядом", [("side_by_side", {"left": "телеграм", "right": "блокнот"})]),
+    ("нажми стрелку влево", [("shortcut", {"action": "left"})]),
     ("страница назад", [("shortcut", {"action": "back"})]),
     ("предыдущая страница", [("shortcut", {"action": "back"})]),
     ("назад в браузере", [("shortcut", {"action": "back"})]),
@@ -223,6 +232,7 @@ def test_phrase(run, phrase, expected):
     "я хочу спать",              # обычный разговор не должен усыплять
     "мне нравится твой голос",   # и ставить лайки
     "сколько лайков у этого видео",
+    "рядом дом и магазин",       # не приложения - не раскладка окон
 ])
 def test_goes_to_llm(run, phrase):
     assert run(phrase) is None

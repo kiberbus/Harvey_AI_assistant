@@ -24,6 +24,8 @@ from phrases import (
     GOOGLE,
     HEARING_FIXES,
     MUSIC_APP,
+    SIDE_BY_SIDE,
+    WINDOW_PLACE,
     YT,
 )
 from core.util import (  # noqa: F401
@@ -80,6 +82,24 @@ def _currency_codes(seg: str) -> list[str]:
     if not codes and "валют" in seg:
         codes = ["USD", "EUR", "RUB"]
     return codes
+
+
+WINDOW_PLACE_RE = re.compile(WINDOW_PLACE)
+SIDE_BY_SIDE_RES = [re.compile(p) for p in SIDE_BY_SIDE]
+
+
+def _known_app(name: str) -> bool:
+    name = name.strip()
+    return name in APP_ALIASES or find_app(name) is not None
+
+
+def parse_side_by_side(low: str) -> Callable[[], str] | None:
+    """«Рядом хром и телеграм» - одна команда, хотя в ней есть «и»."""
+    for rx in SIDE_BY_SIDE_RES:
+        m = rx.match(low)
+        if m and _known_app(m.group("a")) and _known_app(m.group("b")):
+            return lambda a=m.group("a"), b=m.group("b"): tools.execute_tool("side_by_side", {"left": a, "right": b})
+    return None
 
 
 def parse_local(segment: str) -> Callable[[], str] | None:
@@ -181,6 +201,12 @@ def parse_local(segment: str) -> Callable[[], str] | None:
         return lambda: tools.execute_tool("screenshot", {})
     if R["lock"].search(seg):
         return lambda: tools.execute_tool("lock_pc", {})
+
+    # «Телеграм влево», «хром на второй монитор» (без названия - «окно влево» - это клавиши выше)
+    m = WINDOW_PLACE_RE.match(seg)
+    if m and _known_app(m.group("name")):
+        position = next(k for k in ("left", "right", "monitor") if m.group(k))
+        return lambda n=m.group("name"), p=position: tools.execute_tool("arrange_window", {"position": p, "name": n})
 
     # Свернуть / развернуть приложение
     m = re.match(r"(?:сверни|свернуть|спрячь)\s+(?:приложение\s+|программу\s+|окно\s+)?(.+)$", seg)
@@ -572,7 +598,7 @@ def parse_all(low: str) -> list[Callable[[], str]] | None:
     if MUSIC_APP_RE.fullmatch(low):                     # «запусти яндекс музыку» - открыть и сразу включить
         return [lambda: tools.execute_tool("play_app", {"name": MEDIA_FALLBACK_APP["music"]})]
     # "ютуб стоп" - пауза, "ютуб на 30" - громкость, а не поиск; напоминание по "и" не режу
-    whole = parse_reminder(low) or parse_app_volume(low) or parse_media(low) or parse_search(low)
+    whole = parse_side_by_side(low) or parse_reminder(low) or parse_app_volume(low) or parse_media(low) or parse_search(low)
     if whole:
         return [whole]
     if calc.parse(low):                                 # «2 плюс 2», «5 миль в километрах», «доллар к тенге»

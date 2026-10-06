@@ -78,6 +78,7 @@ SHORTCUT_KEYS: dict[str, tuple[list[tuple[int, ...]], str]] = {
     "window_right": ([(WIN, RIGHT)], f"прикрепил{END} окно вправо"),
     "window_up": ([(WIN, UP)], f"развернул{END} окно"),
     "window_down": ([(WIN, DOWN)], f"уменьшил{END} окно"),
+    "window_monitor": ([(WIN, SHIFT, RIGHT)], f"{'перенесла' if FEMALE_VOICE else 'перенёс'} окно на другой монитор"),
 }
 
 

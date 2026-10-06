@@ -61,8 +61,12 @@ from core.winapi import (  # noqa: F401
     _windows_of,
     bring_to_front,
     foreground_title,
+    half,
+    move_to_next_monitor,
     paste_text,
+    place_window,
     type_text,
+    window_area,
 )
 from core.speech import (  # noqa: F401
     play_sound,
@@ -569,6 +573,70 @@ def show_desktop() -> str:
 def alt_tab() -> str:
     _chord(VK_MENU, VK_TAB)
     return f"переключил{END} окно"
+
+
+def _app_window(name: str) -> int | None:
+    """Главное окно приложения: видимое раньше скрытого."""
+    pids = {p.pid for p in _find_procs(_app_exes(name), set())}
+    windows = _windows_of(pids) if pids else []
+    return windows[0][0] if windows else None
+
+
+def _wait_app_window(name: str, timeout: float = 6.0) -> int | None:
+    """Окно приложения; если оно не запущено - запускаю и жду, пока появится окно."""
+    hwnd = _app_window(name)
+    if hwnd:
+        return hwnd
+    if open_app(name).startswith(FAIL):
+        return None
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(0.3)
+        hwnd = _app_window(name)
+        if hwnd:
+            time.sleep(0.5)          # окно только создано - даю ему дорисоваться, иначе оно само сдвинется
+            return hwnd
+    return None
+
+
+def arrange_window(position: str, name: str = "") -> str:
+    """«Телеграм влево», «хром на второй монитор». Без названия - активное окно."""
+    if psutil is None:
+        raise RuntimeError("psutil не установлен")
+    hwnd = _app_window(name) if name else _user32.GetForegroundWindow()
+    if not hwnd:
+        return f"{FAIL}«{name}» не запущено" if name else f"{FAIL}нет активного окна"
+    what = name or "окно"
+    if position == "monitor":
+        if not move_to_next_monitor(hwnd):
+            return f"{FAIL}монитор всего один"
+        _force_foreground(hwnd)
+        return f"{'перенесла' if END else 'перенёс'} {what} на другой монитор"
+    if position not in ("left", "right"):
+        return f"{FAIL}не знаю положение «{position}»"
+    place_window(hwnd, half(window_area(hwnd), position))
+    _force_foreground(hwnd)
+    return f"поставил{END} {what} {'слева' if position == 'left' else 'справа'}"
+
+
+def side_by_side(left: str, right: str) -> str:
+    """«Рядом Chrome и Telegram»: первое приложение на левую половину экрана, второе на правую.
+    Экран - тот, где сейчас активное окно. Не запущенное приложение сначала открываю."""
+    if psutil is None:
+        raise RuntimeError("psutil не установлен")
+    area = window_area(_user32.GetForegroundWindow())
+    windows = []
+    for name in (left, right):
+        hwnd = _wait_app_window(name)
+        if not hwnd:
+            return f"{FAIL}окно «{name}» не появилось"
+        windows.append(hwnd)
+    if windows[0] == windows[1]:
+        return f"{FAIL}это одно и то же окно"
+    for hwnd, side in zip(windows, ("left", "right")):
+        place_window(hwnd, half(area, side))
+        _force_foreground(hwnd)
+    return f"поставил{END} рядом {left} и {right}"
 
 
 def screenshot() -> str:

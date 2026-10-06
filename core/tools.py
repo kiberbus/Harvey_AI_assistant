@@ -20,6 +20,7 @@ from core.audio import (  # noqa: F401
 )
 from core.apps import (  # noqa: F401
     alt_tab,
+    arrange_window,
     change_brightness,
     close_active,
     close_app,
@@ -33,6 +34,7 @@ from core.apps import (  # noqa: F401
     screenshot,
     set_brightness,
     show_desktop,
+    side_by_side,
     window_state,
 )
 from core.media import (  # noqa: F401
@@ -86,6 +88,8 @@ FUNCTIONS: dict[str, Callable[..., str]] = {
     "window_state": window_state,
     "show_desktop": show_desktop,
     "alt_tab": alt_tab,
+    "arrange_window": arrange_window,
+    "side_by_side": side_by_side,
     "screenshot": screenshot,
     "lock_pc": lock_pc,
     "tell_time": tell_time,
@@ -146,6 +150,14 @@ TOOLS = [
           {"show_all": {"type": "boolean"}}, []),
     _tool("minimize_app", "Свернуть окно приложения (не закрывая его).",
           {"name": {"type": "string", "description": "Название приложения"}}, ["name"]),
+    _tool("arrange_window", "Поставить окно приложения на левую или правую половину экрана "
+                            "или перенести на другой монитор.",
+          {"position": {"type": "string", "enum": ["left", "right", "monitor"]},
+           "name": {"type": "string", "description": "Название приложения; не указывай для активного окна"}},
+          ["position"]),
+    _tool("side_by_side", "Поставить два приложения рядом: первое слева, второе справа.",
+          {"left": {"type": "string", "description": "Приложение слева"},
+           "right": {"type": "string", "description": "Приложение справа"}}, ["left", "right"]),
     _tool("close_app", "Закрыть запущенное приложение. Только если явно просят закрыть, а не свернуть.",
           {"name": {"type": "string", "description": "Название приложения"}}, ["name"]),
     _tool("close_active", "Закрыть активное (текущее) окно или приложение.",
@@ -168,7 +180,7 @@ TOOLS = [
     _tool("change_brightness", "Изменить яркость экрана на указанное число процентов.", {"delta": _DELTA}, ["delta"]),
     _tool("shortcut", "Нажать сочетание клавиш в активном окне: копировать, вставить, отменить, сохранить, "
                       "выделить всё, очистить поле, Enter, вкладки браузера, обновить, назад, полный экран, "
-                      "окно влево/вправо.",
+                      "окно влево/вправо, окно на другой монитор.",
           {"action": {"type": "string", "enum": list(system.SHORTCUT_KEYS)}}, ["action"]),
     _tool("system_status", "Загрузка процессора и оперативной памяти.", {}, []),
     _tool("gpu_status", "Температура и загрузка видеокарты.", {}, []),

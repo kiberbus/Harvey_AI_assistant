@@ -212,6 +212,123 @@ def foreground_rect() -> tuple[int, int, int, int] | None:
     return rect.left, rect.top, rect.right, rect.bottom
 
 
+MONITOR_DEFAULTTONEAREST = 2
+SWP_NOZORDER, SWP_NOACTIVATE = 0x0004, 0x0010
+_SW_RESTORE, _SW_MAXIMIZE = 9, 3
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+
+if _user32:
+    MONITORENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC,
+                                         ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
+    _user32.EnumDisplayMonitors.argtypes = (wintypes.HDC, ctypes.c_void_p, MONITORENUMPROC, wintypes.LPARAM)
+    _user32.MonitorFromWindow.argtypes = (wintypes.HWND, wintypes.DWORD)
+    _user32.MonitorFromWindow.restype = wintypes.HMONITOR
+    _user32.GetMonitorInfoW.argtypes = (wintypes.HMONITOR, ctypes.POINTER(MONITORINFO))
+    _user32.SetWindowPos.argtypes = (wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                     ctypes.c_int, ctypes.c_int, wintypes.UINT)
+    _user32.IsZoomed.argtypes = (wintypes.HWND,)
+
+
+Rect = tuple[int, int, int, int]
+
+
+def _work_area(monitor) -> Rect:
+    """Рабочая область монитора - без панели задач."""
+    info = MONITORINFO(cbSize=ctypes.sizeof(MONITORINFO))
+    _user32.GetMonitorInfoW(monitor, ctypes.byref(info))
+    r = info.rcWork
+    return r.left, r.top, r.right, r.bottom
+
+
+class _DpiAware:
+    """Внутри все координаты в реальных пикселях. Без этого на мониторах с разным масштабом
+    окно уезжает не туда: Windows пересчитывает координаты по масштабу основного монитора."""
+
+    def __enter__(self):
+        self.old = _user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+
+    def __exit__(self, *exc):
+        if self.old:
+            _user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(self.old))
+
+
+def monitor_areas() -> list[Rect]:
+    """Рабочие области всех мониторов слева направо."""
+    found: list[Rect] = []
+
+    def callback(monitor, _hdc, _rect, _lparam):
+        found.append(_work_area(monitor))
+        return True
+
+    with _DpiAware():
+        _user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(callback), 0)
+    return sorted(found)
+
+
+def window_area(hwnd: int) -> Rect:
+    """Рабочая область монитора, на котором окно."""
+    with _DpiAware():
+        return _work_area(_user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST))
+
+
+def _visible_rect(hwnd: int) -> tuple[wintypes.RECT, wintypes.RECT]:
+    """(GetWindowRect, видимая рамка). У окон Windows 10/11 есть невидимые края по ~7 px."""
+    outer, visible = wintypes.RECT(), wintypes.RECT()
+    _user32.GetWindowRect(hwnd, ctypes.byref(outer))
+    if _dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS,
+                                     ctypes.byref(visible), ctypes.sizeof(visible)) != 0:
+        visible = outer
+    return outer, visible
+
+
+def place_window(hwnd: int, rect: Rect) -> None:
+    """Ставит окно так, чтобы его видимая часть заняла rect (развёрнутое сначала восстанавливаю)."""
+    with _DpiAware():
+        if _user32.IsIconic(hwnd) or _user32.IsZoomed(hwnd):
+            _user32.ShowWindow(hwnd, _SW_RESTORE)
+        outer, visible = _visible_rect(hwnd)
+        left, top, right, bottom = rect
+        # невидимые края добавляю снаружи, иначе между окнами останется щель
+        left -= visible.left - outer.left
+        top -= visible.top - outer.top
+        right += outer.right - visible.right
+        bottom += outer.bottom - visible.bottom
+        _user32.SetWindowPos(hwnd, None, left, top, right - left, bottom - top, SWP_NOZORDER | SWP_NOACTIVATE)
+
+
+def move_to_next_monitor(hwnd: int) -> bool:
+    """Переносит окно на следующий монитор, сохраняя положение и размер в долях экрана.
+    False - монитор один."""
+    areas = monitor_areas()
+    if len(areas) < 2:
+        return False
+    maximized = bool(_user32.IsZoomed(hwnd))
+    with _DpiAware():
+        if _user32.IsIconic(hwnd) or maximized:     # у свёрнутого окна координаты -32000, монитор не определить
+            _user32.ShowWindow(hwnd, _SW_RESTORE)
+        _, v = _visible_rect(hwnd)
+    src = window_area(hwnd)
+    dst = areas[(areas.index(src) + 1) % len(areas)] if src in areas else areas[0]
+    sx, sy = (dst[2] - dst[0]) / (src[2] - src[0]), (dst[3] - dst[1]) / (src[3] - src[1])
+    place_window(hwnd, (dst[0] + round((v.left - src[0]) * sx), dst[1] + round((v.top - src[1]) * sy),
+                        dst[0] + round((v.right - src[0]) * sx), dst[1] + round((v.bottom - src[1]) * sy)))
+    if maximized:
+        _user32.ShowWindow(hwnd, _SW_MAXIMIZE)
+    return True
+
+
+def half(area: Rect, side: str) -> Rect:
+    """Левая или правая половина рабочей области."""
+    left, top, right, bottom = area
+    mid = (left + right) // 2
+    return (left, top, mid, bottom) if side == "left" else (mid, top, right, bottom)
+
+
 def foreground_title() -> str:
     buf = ctypes.create_unicode_buffer(256)
     _user32.GetWindowTextW(_user32.GetForegroundWindow(), buf, 256)

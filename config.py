@@ -179,6 +179,7 @@ NAME_GROUPS = [
     ({"notepad", "блокнот"}, ("notepad.exe",)),
     ({"calculator", "калькулятор"}, ("calculatorapp.exe", "calculator.exe")),
     ({"firefox", "мозилла", "фаерфокс", "браузер"}, ("firefox.exe",)),
+    ({"chrome", "google chrome", "хром", "гугл хром"}, ("chrome.exe",)),
     ({"discord", "дискорд"}, ("discord.exe",)),
     ({"steam", "стим"}, ("steam.exe", "steamwebhelper.exe")),
     ({"spotify", "спотифай"}, ("spotify.exe",)),
