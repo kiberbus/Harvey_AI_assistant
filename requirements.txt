@@ -27,5 +27,9 @@ winrt-Windows.Foundation>=2.0
 winrt-Windows.Foundation.Collections>=2.0
 winrt-Windows.Media.Control>=2.0
 
+# Google Календарь и Google Задачи (необязательно: без них Харви работает, но без календаря)
+google-api-python-client>=2.100
+google-auth-oauthlib>=1.2
+
 # Тесты
 pytest>=8.0

@@ -6,6 +6,7 @@ import json
 import ollama
 import time
 from collections import deque
+from datetime import datetime
 from typing import Callable
 
 from config import (
@@ -67,6 +68,8 @@ SYSTEM_PROMPT = f"""Ты — голосовой ассистент по имен
 - Закрыть приложение — close_app. Свернуть приложение — minimize_app (НЕ закрывай, если просят свернуть).
 - Слова «его», «это», «то же» относятся к последнему упомянутому в диалоге.
 - Название приложения передавай на английском, как в меню Пуск.
+- Календарь: встречи — calendar_add_event, планы на день — calendar_agenda, задачи — task_add / task_list / task_done.
+  Даты считай от сегодняшней (она в конце подсказки), «завтра в 3» — это 15:00.
 - Если инструмент не нужен, ответь одним-двумя короткими предложениями по-русски, без списков и разметки.
 """
 
@@ -85,12 +88,21 @@ def _run_tools(tool_calls, user_text: str) -> None:
     _reply(phrases, user_text)
 
 
+_WEEKDAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
+
+
+def _today_line() -> str:
+    """Без даты модель не посчитает «в пятницу» для календаря."""
+    now = datetime.now()
+    return f"Сейчас {now:%Y-%m-%d %H:%M}, {_WEEKDAYS[now.weekday()]}.\n"
+
+
 def run_llm(user_text: str) -> None:
     """Один запрос к модели. Инструменты выполняю сам и ответ собираю кодом, обычный текст
     озвучиваю по предложениям прямо во время генерации."""
     global _last_reply
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": SYSTEM_PROMPT + _today_line()},
         *_history_messages(),
         {"role": "user", "content": user_text},
     ]

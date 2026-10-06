@@ -70,6 +70,7 @@ from core.tray import (  # noqa: F401
     restart_self,
 )
 from core import browser, calc, system, undo
+from core import gcal
 
 
 FUNCTIONS: dict[str, Callable[..., str]] = {
@@ -127,6 +128,14 @@ FUNCTIONS: dict[str, Callable[..., str]] = {
     "gpu_status": system.gpu_status,
     "microphone": system.microphone,
     "calculate": calc.calculate,
+    "calendar_agenda": gcal.calendar_agenda,
+    "calendar_next": gcal.calendar_next,
+    "calendar_add_event": gcal.calendar_add_event,
+    "calendar_delete": gcal.calendar_delete,
+    "calendar_delete_id": gcal.calendar_delete_id,     # только после «да», ИИ его не видит
+    "task_add": gcal.task_add,
+    "task_list": gcal.task_list,
+    "task_done": gcal.task_done,
     "undo": undo.undo,
 }
 
@@ -144,6 +153,7 @@ def _tool(name: str, description: str, properties: dict, required: list[str]) ->
 
 _PERCENT = {"type": "integer", "description": "Значение 0-100"}
 _DELTA = {"type": "integer", "description": "Изменение: положительное — больше, отрицательное — меньше"}
+_DAY = {"type": "string", "description": "Дата ГГГГ-ММ-ДД (сегодняшняя дата есть в системной подсказке)"}
 
 TOOLS = [
     _tool("open_app", "Открыть установленное приложение.",
@@ -206,6 +216,22 @@ TOOLS = [
     _tool("system_status", "Загрузка процессора и оперативной памяти.", {}, []),
     _tool("gpu_status", "Температура и загрузка видеокарты.", {}, []),
     _tool("microphone", "Включить (true) или выключить (false) микрофон.", {"state": {"type": "boolean"}}, ["state"]),
+    _tool("calendar_agenda", "Что запланировано в Google Календаре на день: встречи и задачи со сроком.",
+          {"day": _DAY}, []),
+    _tool("calendar_next", "Когда следующая встреча в календаре.", {}, []),
+    _tool("calendar_add_event", "Добавить встречу/событие в Google Календарь.",
+          {"title": {"type": "string", "description": "Название по-русски, например «Встреча с врачом»"},
+           "start": {"type": "string", "description": "ГГГГ-ММ-ДДTЧЧ:ММ; только ГГГГ-ММ-ДД - событие на весь день"},
+           "duration_min": {"type": "integer", "description": "Длительность в минутах, если сказали"},
+           "color": {"type": "string", "enum": list(gcal.COLOR_IDS)}}, ["title", "start"]),
+    _tool("calendar_delete", "Удалить встречу из календаря (спросит подтверждение).",
+          {"title": {"type": "string"}, "when": _DAY}, []),
+    _tool("task_add", "Добавить задачу в Google Задачи, со сроком или без.",
+          {"title": {"type": "string"},
+           "due": {"type": "string", "description": "Срок ГГГГ-ММ-ДД или ГГГГ-ММ-ДДTЧЧ:ММ; не указывай, если срока нет"}},
+          ["title"]),
+    _tool("task_list", "Прочитать список невыполненных задач.", {}, []),
+    _tool("task_done", "Отметить задачу выполненной.", {"title": {"type": "string"}}, ["title"]),
 ]
 
 

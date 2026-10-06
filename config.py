@@ -166,6 +166,17 @@ WEATHER_CITY = "Астана"       # город для погоды (Open-Meteo
 CURRENCY_HOME = "KZT"            # в какой валюте называть курс
 CURRENCY_HOME_NAME = "тенге"
 
+# Google Календарь и Google Задачи
+# Ключ OAuth (тип «Desktop app») из Google Cloud Console кладётся сюда; как получить - в README.
+# При первой команде откроется браузер для входа, токен сохранится в GCAL_TOKEN_FILE. Оба файла не в git
+GCAL_CREDENTIALS_FILE = BASE_DIR / "google_credentials.json"
+GCAL_TOKEN_FILE = BASE_DIR / "google_token.json"
+GCAL_CALENDAR_ID = "primary"     # основной календарь аккаунта
+GCAL_TASKLIST_ID = "@default"    # основной список задач («Мои задачи»)
+GCAL_EVENT_MINUTES = 60          # длительность встречи, если не сказали «на 2 часа»
+GCAL_LOOKAHEAD_DAYS = 60         # насколько вперёд искать встречу для «удали встречу с врачом»
+GCAL_AUTH_TIMEOUT = 180          # сколько секунд ждать входа в Google в браузере
+
 LOG_ENABLED = True               # в лог пишется вся распознанная речь
 LOG_FILE = BASE_DIR / "harvey.log"
 LOG_MAX_MB = 1                   # храню ещё 2 старых файла
@@ -182,6 +193,7 @@ SITES = {
     "colab": "https://colab.research.google.com",
     "astanahub": "https://astanahub.com",
     "stepik": "https://stepik.org",
+    "calendar": "https://calendar.google.com",
 }
 
 _HOME = os.path.expanduser("~")

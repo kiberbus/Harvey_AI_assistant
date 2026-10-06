@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import date
 from datetime import datetime
 from datetime import timedelta
 from typing import Callable
@@ -19,6 +20,12 @@ from phrases import (
     AUDIO_OUTPUT,
     AUDIO_OUTPUT_SHORT,
     BARE_FOLDERS,
+    CAL_AGENDA,
+    CAL_COLORS,
+    CAL_DAY,
+    CAL_EVENT_ADD,
+    CAL_EVENT_DELETE,
+    CAL_NEXT,
     CURRENCY_WORDS,
     DRIVE_LETTERS,
     FOLDER_ALIASES,
@@ -32,6 +39,11 @@ from phrases import (
     TAB_CONTEXT_PREV,
     TAB_SWITCH_NAMED,
     TAB_SWITCH_SITE,
+    TASK_ADD,
+    TASK_DONE,
+    TASK_DUE_WORDS,
+    TASK_LIST,
+    TASK_NO_DUE,
     WINDOW_PLACE,
     YT,
 )
@@ -439,9 +451,10 @@ def _numbers_to_digits(text: str) -> str:
 _REMIND_IN_RE = re.compile(
     r"\bчерез\s+((?:пол\s?часа|час|минуту|\d+\s*(?:час\w*|минут\w*|мин\b|секунд\w*|сек\b))"
     r"(?:\s*(?:и\s+)?\d+\s*(?:минут\w*|мин\b|секунд\w*|сек\b))?)")
-_REMIND_AT_RE = re.compile(
-    r"\b(?:в|на|к)\s+(\d{1,2})(?:\s*[:.]\s*(\d{2})|\s+(\d{2})(?=\s|$))?(?:\s*час\w*)?"
-    r"(?:\s*(\d{1,2})\s*минут\w*)?(?:\s+(утра|дня|вечера|ночи))?")
+# Время суток: «18:00», «18.30», «18 30», «6 часов 15 минут», «3 часа дня»
+_CLOCK = (r"(\d{1,2})(?:\s*[:.]\s*(\d{2})|\s+(\d{2})(?=\s|$))?(?:\s*час\w*)?"
+          r"(?:\s*(\d{1,2})\s*минут\w*)?(?:\s+(утра|дня|вечера|ночи))?")
+_REMIND_AT_RE = re.compile(r"\b(?:в|на|к)\s+" + _CLOCK)
 _REMIND_NOON_RE = re.compile(r"\b(?:в|к)\s+(полдень|полночь)\b")
 _REMIND_DAY_RE = re.compile(r"\b(сегодня|завтра|послезавтра)\b")
 
@@ -469,22 +482,13 @@ def parse_reminder(low: str) -> Callable[[], str] | None:
             at = now.timestamp() + seconds
     else:
         m = _REMIND_NOON_RE.search(text) or _REMIND_AT_RE.search(text)
-        if m:
-            if m.re is _REMIND_NOON_RE:
-                hour, minute = (12 if m.group(1) == "полдень" else 0), 0
-            else:
-                hour = int(m.group(1))
-                minute = int(m.group(2) or m.group(3) or m.group(4) or 0)
-                part = m.group(5)
-                if part in ("дня", "вечера") and hour < 12:
-                    hour += 12
-                elif part in ("ночи", "утра") and hour == 12:
-                    hour = 0
-            if hour <= 23 and minute <= 59:
-                moment = now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=shift or 0)
-                if shift is None and moment <= now:           # "в 9", а уже 10 - значит завтра
-                    moment += timedelta(days=1)
-                at = moment.timestamp()
+        clock = _clock_value(m) if m else None
+        if clock:
+            hour, minute = clock
+            moment = now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=shift or 0)
+            if shift is None and moment <= now:           # "в 9", а уже 10 - значит завтра
+                moment += timedelta(days=1)
+            at = moment.timestamp()
     if at is None:
         return lambda: f"{INFO}скажите, когда напомнить, например: напомни в 18 часов позвонить маме"
 
@@ -496,6 +500,222 @@ def parse_reminder(low: str) -> Callable[[], str] | None:
     if not message and verb.group().startswith("разбуд"):
         message = "пора вставать"
     return lambda: tools.execute_tool("add_reminder", {"at": at, "text": message})
+
+
+def _clock_value(m: re.Match, guess_pm: bool = False) -> tuple[int, int] | None:
+    """Час и минута из _REMIND_NOON_RE / _CLOCK. guess_pm: «встреча в 3» - это 15:00, а не ночь."""
+    if m.re is _REMIND_NOON_RE:
+        return (12 if m.group(1) == "полдень" else 0), 0
+    groups = m.groups()[-5:]                     # группы _CLOCK всегда последние
+    hour, minute, part = int(groups[0]), int(groups[1] or groups[2] or groups[3] or 0), groups[4]
+    if part in ("дня", "вечера") and hour < 12:
+        hour += 12
+    elif part in ("ночи", "утра") and hour == 12:
+        hour = 0
+    elif part is None and guess_pm and 1 <= hour <= 6:
+        hour += 12
+    return (hour, minute) if hour <= 23 and minute <= 59 else None
+
+
+# Google Календарь и Google Задачи.
+# Из фразы по очереди вынимаю длительность («на 2 часа»), день («в пятницу»), время («в 15:00»)
+# и цвет («красным»); что осталось - название. Длительность раньше времени: «на 2 часа» - не 2 ночи.
+
+def _any(patterns: list[str]) -> re.Pattern:
+    return re.compile("|".join(f"(?:{p})" for p in patterns))
+
+
+_CAL_DAY_RE = re.compile(r"(?:\b(?:на|в|во|до|к|ко|с|со)\s+)?\b(?P<day>" + CAL_DAY + r")\b")
+_CAL_AT_RE = re.compile(r"\b(?:в|во|на|к|до|с|со)\s+" + _CLOCK)
+_CAL_UNTIL_RE = re.compile(r"\s*(?:до|по|-)\s*" + _CLOCK)        # «с 15 до 17» - конец встречи
+_CAL_DURATION_RE = re.compile(
+    r"\b(?:на|длительностью|продолжительностью)\s+(?P<d>полчаса|полтора\s+часа|час|"
+    r"\d+\s*(?:час\w*|минут\w*)(?:\s*(?:и\s+)?\d+\s*минут\w*)?)(?!\s*(?:утра|дня|вечера|ночи|\d))")
+_CAL_ALL_DAY_RE = re.compile(r"\b(?:на\s+)?(?:весь|целый)\s+день\b")
+_CAL_IN_CALENDAR_RE = re.compile(r"[\s,]*\b(?:в|во)\s+(?:мой\s+)?календар\w*")
+_CAL_COLOR_RES = [(key, re.compile(r"(?:\b(?:в\s+)?цвет\w*\s+)?\b" + stem + r"(?:\s+цвет\w*)?"))
+                  for key, stem in CAL_COLORS.items()]
+_CAL_AGENDA_RE = _any(CAL_AGENDA)
+_CAL_NEXT_RE = _any(CAL_NEXT)
+_CAL_EVENT_ADD_RE = re.compile(CAL_EVENT_ADD)
+_CAL_EVENT_DELETE_RE = re.compile(CAL_EVENT_DELETE)
+_TASK_ADD_RES = [re.compile(p) for p in TASK_ADD]
+_TASK_DONE_RES = [re.compile(p) for p in TASK_DONE]
+_TASK_LIST_RE = _any(TASK_LIST)
+_TASK_NO_DUE_RE = re.compile(TASK_NO_DUE)
+_TASK_DUE_EDGE_RE = re.compile(r"^(?:" + TASK_DUE_WORDS + r")(?:\s+|$)|(?:^|\s+)(?:" + TASK_DUE_WORDS + r")$")
+_MONTH_STEMS = ("январ", "феврал", "март", "апрел", "ма", "июн", "июл", "август", "сентябр", "октябр",
+                "ноябр", "декабр")             # «март» раньше «ма»: «марта» - не май
+_WEEKDAY_STEMS = ("понедельник", "вторник", "сред", "четверг", "пятниц", "суббот", "воскресен")
+_EVENT_NOUNS = {"встреч": "Встреча", "созвон": "Созвон", "событи": "Событие", "мероприяти": "Мероприятие"}
+
+
+def _cal_date(word: str, today: date) -> date | None:
+    """«завтра», «следующую пятницу», «7 октября» -> дата. Прошедшее число - следующего года."""
+    shift = {"сегодня": 0, "завтра": 1, "послезавтра": 2}.get(word)
+    if shift is not None:
+        return today + timedelta(days=shift)
+    m = re.match(r"(\d{1,2})\D*?\s+(\w+)$", word)
+    if m:
+        month = next(i + 1 for i, stem in enumerate(_MONTH_STEMS) if m.group(2).startswith(stem))
+        try:
+            found = date(today.year, month, int(m.group(1)))
+        except ValueError:                     # «31 сентября»
+            return None
+        return found if found >= today else found.replace(year=today.year + 1)
+    weekday = next(i for i, stem in enumerate(_WEEKDAY_STEMS) if stem in word)
+    if "следующ" in word:                      # «в следующую пятницу» - на следующей неделе
+        return today + timedelta(days=7 - today.weekday() + weekday)
+    return today + timedelta(days=(weekday - today.weekday()) % 7)
+
+
+def _cut(text: str, m: re.Match) -> str:
+    """Убираю найденное, не сдвигая остальное: позиции в text и в его копии без «ё» совпадают."""
+    return text[:m.start()] + " " * (m.end() - m.start()) + text[m.end():]
+
+
+def _cal_when(text: str) -> dict:
+    """{"day": date | None, "clock": (ч, м) | None, "minutes": длительность | None,
+    "all_day": bool, "color": ключ | None, "rest": остаток фразы}."""
+    text = _numbers_to_digits(text)
+    norm = text.replace("ё", "е")
+    info: dict = {"day": None, "clock": None, "minutes": None, "all_day": False, "color": None}
+
+    def cut(m: re.Match) -> None:
+        nonlocal text, norm
+        text, norm = _cut(text, m), _cut(norm, m)
+
+    for m in _CAL_DURATION_RE.finditer(norm):
+        spoken = m.group("d")
+        minutes = 90 if spoken.startswith("полтора") else (parse_duration(spoken) or 0) // 60
+        if 0 < minutes <= 12 * 60:             # «на 15 часов» - это время, а не длительность
+            info["minutes"] = minutes
+            cut(m)
+            break
+    m = _CAL_ALL_DAY_RE.search(norm)
+    if m:
+        info["all_day"] = True
+        cut(m)
+    m = _CAL_DAY_RE.search(norm)
+    if m:
+        info["day"] = _cal_date(m.group("day"), date.today())
+        cut(m)
+    m = _REMIND_NOON_RE.search(norm) or _CAL_AT_RE.search(norm)
+    if m:
+        info["clock"] = _clock_value(m, guess_pm=True)
+        until = _CAL_UNTIL_RE.match(norm, m.end()) if m.re is _CAL_AT_RE else None
+        cut(m)
+        if until and info["clock"]:            # «с 15 до 17»
+            end = _clock_value(until, guess_pm=True)
+            if end and end > info["clock"]:
+                info["minutes"] = (end[0] - info["clock"][0]) * 60 + end[1] - info["clock"][1]
+            cut(until)
+    for key, rx in _CAL_COLOR_RES:
+        m = rx.search(norm)
+        if m and ("цвет" in m.group() or m.group().endswith(("ым", "им"))):   # «красным», «цвет красный»
+            info["color"] = key
+            cut(m)
+            break
+    info["rest"] = " ".join(text.split()).strip(PUNCT)
+    return info
+
+
+def _cal_moment(info: dict) -> str | None:
+    """'2026-10-08T15:00' или '2026-10-08' (весь день). «В 9», а уже 10 - значит завтра."""
+    day, clock = info["day"], info["clock"]
+    if clock is None or info["all_day"]:
+        return day.isoformat() if day else None
+    moment = datetime.combine(day or date.today(), datetime.min.time()).replace(hour=clock[0], minute=clock[1])
+    if day is None and moment <= datetime.now():
+        moment += timedelta(days=1)
+    return moment.strftime("%Y-%m-%dT%H:%M")
+
+
+def _strip_words(text: str, lead: tuple[str, ...], tail: tuple[str, ...]) -> str:
+    words = text.replace(",", " ").split()
+    while words and words[0] in lead:
+        words.pop(0)
+    while words and words[-1] in tail:
+        words.pop()
+    return " ".join(words).strip(PUNCT)
+
+
+def _capital(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
+def _parse_event_add(low: str) -> Callable[[], str] | None:
+    m = _CAL_EVENT_ADD_RE.match(low)
+    if not m or not (m.group("verb") or low.startswith("нов")):
+        return None
+    rest = m.group("rest")
+    in_calendar = m.group("cal") or _CAL_IN_CALENDAR_RE.search(rest)
+    if not (m.group("noun") or in_calendar):
+        return None                            # «поставь лайк», «запиши хлеб» - не календарь
+    info = _cal_when(_CAL_IN_CALENDAR_RE.sub(" ", rest))
+    title = _strip_words(info["rest"], ("и", "а", "мне", "новую", "новое"),
+                         ("на", "в", "во", "к", "до", "с", "со", "и", "а", "по", "цветом"))
+    noun = next((name for stem, name in _EVENT_NOUNS.items() if (m.group("noun") or "").startswith(stem)), None)
+    if noun in ("Встреча", "Созвон"):          # «встречу с врачом» - «Встреча с врачом»
+        title = f"{noun} {title}".strip()
+    title = _capital(title or noun or "Событие")
+    start = _cal_moment(info)
+    if start is None:
+        return lambda: f"{INFO}скажите, когда: например, добавь встречу завтра в 15 часов"
+    args: dict = {"title": title, "start": start}
+    if info["minutes"] and "T" in start:
+        args["duration_min"] = info["minutes"]
+    if info["color"]:
+        args["color"] = info["color"]
+    return lambda: tools.execute_tool("calendar_add_event", args)
+
+
+def _parse_task_add(low: str) -> Callable[[], str] | None:
+    m = next((rx.match(low) for rx in _TASK_ADD_RES if rx.match(low)), None)
+    if not m:
+        return None
+    rest = _TASK_NO_DUE_RE.sub(" ", m.group("rest"))
+    info = _cal_when(rest)
+    title = info["rest"]
+    while True:                                # «сдать отчёт со сроком до» - убираю слова срока по краям
+        trimmed = _TASK_DUE_EDGE_RE.sub("", title).strip(PUNCT)
+        if trimmed == title:
+            break
+        title = trimmed
+    title = _strip_words(title, ("и", "а", "мне"), ("и", "а"))
+    if not title:
+        return lambda: f"{RAW}Какую задачу добавить?"
+    args: dict = {"title": title}
+    due = _cal_moment({**info, "all_day": False}) if (info["day"] or info["clock"]) else None
+    if due:
+        args["due"] = due
+    return lambda: tools.execute_tool("task_add", args)
+
+
+def parse_calendar(low: str) -> Callable[[], str] | None:
+    """Google Календарь и Задачи: «что у меня завтра», «добавь встречу в пятницу в 10 утра синим цветом»,
+    «добавь задачу сдать отчёт до пятницы», «отметь задачу купить молоко выполненной»."""
+    for rx in _TASK_DONE_RES:                  # раньше добавления: «задача X выполнена» - не новая задача
+        m = rx.match(low)
+        if m:
+            return lambda t=m.group("title").strip(PUNCT): tools.execute_tool("task_done", {"title": t})
+    if _TASK_LIST_RE.search(low):
+        return lambda: tools.execute_tool("task_list", {})
+    task = _parse_task_add(low)
+    if task:
+        return task
+    m = _CAL_EVENT_DELETE_RE.match(low)
+    if m:
+        info = _cal_when(m.group("rest"))
+        title = _strip_words(info["rest"], ("и", "а", "мою", "эту"), ("на", "в", "во", "и", "а"))
+        when = _cal_moment(info) or ""
+        return lambda: tools.execute_tool("calendar_delete", {"title": title, "when": when})
+    if _CAL_NEXT_RE.search(low):
+        return lambda: tools.execute_tool("calendar_next", {})
+    if _CAL_AGENDA_RE.search(low):
+        day = _cal_when(low)["day"] or date.today()
+        return lambda: tools.execute_tool("calendar_agenda", {"day": day.isoformat()})
+    return _parse_event_add(low)
 
 
 TAB_CLOSE_NAMED_RE = re.compile(TAB_CLOSE_NAMED)
@@ -703,6 +923,9 @@ def _bare_name(segment: str) -> bool:
 def parse_all(low: str) -> list[Callable[[], str]] | None:
     """Разбирает всю команду. Если хоть одна часть не разобралась - None, и всё уходит в ИИ."""
     low = fix_hearing(low)
+    calendar = parse_calendar(low)                      # раньше вкладок и цепочек: «встреча с Машей и Петей» - одна
+    if calendar:
+        return [calendar]
     tab_action = parse_browser(low)                     # «назад», «закрой вкладку ютуб» - до медиа и поиска
     if tab_action:
         return [tab_action]

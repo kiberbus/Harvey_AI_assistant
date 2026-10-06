@@ -11,6 +11,9 @@ reminders.json
 .duck_state.json
 отчёт по логу.txt
 crash.log*
+# Ключ и токен Google Календаря: доступ к аккаунту
+google_credentials.json
+google_token.json
 
 # Скачанные модели (большие, скачиваются заново сами)
 piper/

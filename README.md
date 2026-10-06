@@ -36,6 +36,7 @@ with tool calling. Replies are spoken with Silero or Piper TTS. Nothing leaves t
 | 🔊 **Sound and screen** | "volume 30", "music quieter", "Telegram to 50", "brighter", "mute" |
 | 🪟 **Windows and keys** | "minimize all", "switch window", "close tab", "take a screenshot", "lock the PC" |
 | ⏰ **Time and tasks** | "timer for 5 minutes", "remind me at 18:00 to call mom", "note: buy bread", "what's the date" |
+| 📅 **Google Calendar** | "what do I have tomorrow", "add a meeting tomorrow at 3 pm in red", "add task: send the report by Friday", "mark the task done" |
 | 🌦️ **Info** | "what's the weather", "dollar rate", "what is 15% of 2400", "CPU load" |
 | ⌨️ **Dictation** | "write ..." types text into the active window, the LLM adds punctuation |
 | 🧠 **AI** | "what is quantum entanglement", "translate the selection", "rewrite it politer", "what's on the screen" |
@@ -100,6 +101,13 @@ Ollama and Whisper models, device (`cuda` / `cpu`), weather city, home currency,
 Whisper mishearings are in [`phrases.py`](phrases.py). A custom wake word model can be trained by
 following [`wake/КАК ОБУЧИТЬ.txt`](wake/КАК%20ОБУЧИТЬ.txt).
 
+**Google Calendar (optional).** In [Google Cloud Console](https://console.cloud.google.com/) create a project,
+enable *Google Calendar API* and *Google Tasks API*, configure the OAuth consent screen (add yourself as a test
+user) and create an OAuth client ID of type *Desktop app*. Save the downloaded JSON as `google_credentials.json`
+next to `harvey.py` and run `.venv\Scripts\python -m core.gcal` once to sign in (or just ask Harvey about
+your calendar - the browser opens by itself). The token is stored in `google_token.json`; both files are
+git-ignored.
+
 ### Project structure
 
 ```
@@ -129,7 +137,7 @@ tests/           348 tests, < 1 s; no mic, models or PowerShell needed
 ### Privacy
 
 Speech recognition, synthesis and the LLM all run locally. Harvey goes online only for what you ask
-(weather via Open-Meteo, exchange rates) and for models on first run. The log with recognized speech stays
+(weather via Open-Meteo, exchange rates, Google Calendar if you connect it) and for models on first run. The log with recognized speech stays
 on your computer and can be turned off with `LOG_ENABLED`.
 
 ---
@@ -153,6 +161,7 @@ on your computer and can be turned off with `LOG_ENABLED`.
 | 🔊 **Звук и экран** | «громкость 30», «музыку тише», «телеграм на 50», «ярче», «выключи звук» |
 | 🪟 **Окна и клавиши** | «сверни всё», «переключи окно», «закрой вкладку», «сделай скриншот», «заблокируй компьютер» |
 | ⏰ **Время и дела** | «таймер на 5 минут», «напомни в 18:00 позвонить маме», «запиши: купить хлеб», «какое сегодня число» |
+| 📅 **Google Календарь** | «что у меня завтра», «добавь встречу завтра в 15:00 красным цветом», «добавь задачу сдать отчёт до пятницы», «отметь задачу купить молоко выполненной», «удали встречу с врачом» |
 | 🌦️ **Справки** | «какая погода», «курс доллара», «сколько будет 15% от 2400», «загрузка процессора» |
 | ⌨️ **Диктовка** | «запиши ...» печатает текст в активное окно, ИИ расставляет знаки препинания |
 | 🧠 **ИИ** | «что такое квантовая запутанность», «переведи выделенное», «перепиши вежливее», «что на экране» |
@@ -204,6 +213,14 @@ ollama pull gemma4:e4b
 ослышки Whisper лежат в [`phrases.py`](phrases.py). Своё слово-активатор можно обучить по инструкции в
 [`wake/КАК ОБУЧИТЬ.txt`](wake/КАК%20ОБУЧИТЬ.txt).
 
+**Google Календарь (по желанию).** В [Google Cloud Console](https://console.cloud.google.com/) создайте проект,
+включите *Google Calendar API* и *Google Tasks API*, настройте экран согласия OAuth (добавьте себя в тестовые
+пользователи) и создайте OAuth-клиент типа *Desktop app*. Скачанный JSON сохраните как `google_credentials.json`
+рядом с `harvey.py` и один раз выполните `.venv\Scripts\python -m core.gcal`, чтобы войти (или просто спросите
+Харви про календарь - браузер откроется сам). Токен сохранится в `google_token.json`; оба файла не попадают в git.
+Цвета встреч: красный, оранжевый, жёлтый, зелёный, светло-зелёный, голубой, синий, фиолетовый, лавандовый,
+розовый, серый. У задач Google хранит только дату срока, поэтому время («до 18:00») пишется в заметку к задаче.
+
 ### Тесты
 
 ```bash
@@ -216,7 +233,7 @@ ollama pull gemma4:e4b
 ### Приватность
 
 Распознавание, синтез и языковая модель работают локально. В сеть Харви ходит только за тем, что вы
-спросили (погода через Open-Meteo, курс валют), и за моделями при первом запуске. Лог с распознанной
+спросили (погода через Open-Meteo, курс валют, Google Календарь, если вы его подключили), и за моделями при первом запуске. Лог с распознанной
 речью хранится только у вас и отключается настройкой `LOG_ENABLED`.
 
 ---

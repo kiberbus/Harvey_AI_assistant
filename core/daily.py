@@ -174,16 +174,23 @@ def do_power(action: str) -> str:
     return f"{FAIL}неизвестное действие {action}"
 
 
-def request_power(action: str) -> str:
-    """Выключение / перезагрузка / сон - только после подтверждения."""
+def ask_confirm(name: str, args: dict, question: str) -> str:
+    """Спросить «да/нет»; на «да» главный цикл выполнит инструмент name(args).
+    Удаление встречи из календаря, выключение компьютера."""
     global _pending
     if not CONFIRM_DANGEROUS:
-        return do_power(action)
+        return _execute(name, args)
     _pending = {
-        "action": lambda: _execute("do_power", {"action": action}),
+        "action": lambda: _execute(name, args),
         "deadline": time.time() + CONFIRM_TIMEOUT,
     }
-    return f"{RAW}Вы уверены, господин, что нужно {_POWER_LABELS[action]}? Скажите «да» или «нет»."
+    return f"{RAW}{question} Скажите «да» или «нет»."
+
+
+def request_power(action: str) -> str:
+    """Выключение / перезагрузка / сон - только после подтверждения."""
+    return ask_confirm("do_power", {"action": action},
+                       f"Вы уверены, господин, что нужно {_POWER_LABELS[action]}?")
 
 
 def cancel_power() -> str:
