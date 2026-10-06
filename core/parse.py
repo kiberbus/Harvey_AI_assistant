@@ -761,6 +761,8 @@ def parse_browser(seg: str) -> Callable[[], str] | None:
             return _tab("close_tab", {"which": which})
     if R["tab_list"].search(seg):
         return _tab("list_tabs", {})
+    if R["copy_link"].search(seg):
+        return _tab("copy_link", {})
     m = TAB_CLOSE_NAMED_RE.match(seg)
     if m:
         name = (m.group("name") or m.group("name2") or "").strip(PUNCT)

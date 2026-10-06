@@ -150,7 +150,12 @@ def _window_tabs(uia, ua, hwnd: int) -> list[_Tab]:
 
 
 def _with_tabs(fn):
-    """Вызывает fn(список окон с вкладками) внутри своего COM, как core/uia.py: иначе падение в _ctypes."""
+    """Вызывает fn(список окон с вкладками) внутри своего COM."""
+    return _with_uia(lambda uia, ua: fn([(hwnd, _window_tabs(uia, ua, hwnd)) for hwnd in browser_windows()]))
+
+
+def _with_uia(fn):
+    """Вызывает fn(uia, ua) внутри своего COM, как core/uia.py: иначе падение в _ctypes."""
     import comtypes
     import comtypes.client
 
@@ -160,7 +165,7 @@ def _with_tabs(fn):
         from comtypes.gen import UIAutomationClient as ua
 
         uia = comtypes.client.CreateObject(ua.CUIAutomation, interface=ua.IUIAutomation)
-        return fn([(hwnd, _window_tabs(uia, ua, hwnd)) for hwnd in browser_windows()])
+        return fn(uia, ua)
     except Exception as e:
         log("Вкладки", f"UI Automation не сработал: {e}")
         return None
@@ -278,3 +283,65 @@ def list_tabs() -> str:
 
     result = _with_tabs(act)
     return result if result is not None else f"{FAIL}не вижу вкладки браузера"
+
+
+# --- адрес страницы ---
+
+_ADDRESS_NAMES = re.compile(r"адрес|address|url", re.IGNORECASE)
+VK_L, VK_ESCAPE = 0x4C, 0x1B
+
+
+def _address_of(uia, ua, hwnd: int) -> str:
+    """Текст адресной строки окна. Firefox: urlbar-input (это ComboBox, а не Edit);
+    Chrome и Edge: поле «Адресная строка и строка поиска»."""
+    root = uia.ElementFromHandle(hwnd)
+    element = root.FindFirst(ua.TreeScope_Descendants,
+                             uia.CreatePropertyCondition(ua.UIA_AutomationIdPropertyId, "urlbar-input"))
+    if not element:
+        fields = root.FindAll(ua.TreeScope_Descendants, uia.CreateOrCondition(
+            uia.CreatePropertyCondition(ua.UIA_ControlTypePropertyId, ua.UIA_EditControlTypeId),
+            uia.CreatePropertyCondition(ua.UIA_ControlTypePropertyId, ua.UIA_ComboBoxControlTypeId)))
+        element = next((fields.GetElement(i) for i in range(fields.Length)
+                        if _ADDRESS_NAMES.search(fields.GetElement(i).CurrentName or "")), None)
+    if not element:
+        return ""
+    pattern = element.GetCurrentPattern(ua.UIA_ValuePatternId)
+    return pattern.QueryInterface(ua.IUIAutomationValuePattern).CurrentValue or ""
+
+
+def _address_by_keys() -> str:
+    """Запасной путь: Ctrl+L, Ctrl+C, Esc в браузере. Прежний буфер copy_selection возвращает на место."""
+    from core import system
+    from core.winapi import VK_CONTROL, copy_selection, press_key
+
+    if not focus_browser():
+        return ""
+    system._chord(VK_CONTROL, VK_L)
+    time.sleep(0.1)
+    text = copy_selection()
+    press_key(VK_ESCAPE)
+    return text
+
+
+def _full_url(text: str) -> str:
+    """Chrome и Firefox прячут «https://» в адресной строке - без схемы ссылка не откроется из мессенджера."""
+    text = text.strip()
+    if text and not re.match(r"^[a-z][\w+.-]*:", text, re.IGNORECASE):
+        text = "https://" + text
+    return text
+
+
+def copy_link() -> str:
+    """«Скопируй ссылку»: адрес открытой вкладки верхнего окна браузера - в буфер обмена.
+    Через UI Automation фокус не уходит: можно сразу вставить ссылку туда, где работаешь."""
+    windows = browser_windows()
+    if not windows:
+        return f"{FAIL}браузер не открыт"
+    url = _with_uia(lambda uia, ua: _address_of(uia, ua, windows[0])) or _address_by_keys()
+    url = _full_url(url)
+    if not url:
+        return f"{FAIL}не вижу адрес страницы"
+    from core.winapi import _set_clipboard_text
+    _set_clipboard_text(url)
+    host = (urllib.parse.urlparse(url).hostname or "").removeprefix("www.")
+    return f"скопировал{END} ссылку" + (f" на {host}" if host else "")
