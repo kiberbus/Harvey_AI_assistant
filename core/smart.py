@@ -7,6 +7,7 @@ import difflib
 import io
 import re
 import time
+import urllib.parse
 from typing import Callable
 
 import ollama
@@ -24,6 +25,8 @@ from config import (
     SMART_DICTATION,
     USE_HONORIFIC,
     VISION_ENABLED,
+    WIKI_ENABLED,
+    WIKI_SENTENCES,
 )
 from phrases import (
     QUESTION,
@@ -33,6 +36,8 @@ from phrases import (
     SELECTION_THIS,
     SELECTION_WORDS,
     TRANSLATE_LANGS,
+    WIKI,
+    WIKI_NOT_SUBJECT,
 )
 from core import llm
 from core.util import (  # noqa: F401
@@ -40,8 +45,12 @@ from core.util import (  # noqa: F401
     FAIL,
     INFO,
     PUNCT,
+    RAW,
     _rx,
     log,
+)
+from core.daily import (  # noqa: F401
+    _http_json,
 )
 from core.apps import (  # noqa: F401
     foreground_is_mine,
@@ -127,6 +136,9 @@ def parse(low: str) -> Callable[[list[dict]], Result] | None:
         if pointed or (action == "rewrite" and style) or (action != "rewrite" and _bare(low, verb)):
             return lambda history, a=action: on_selection(a, low, style)
         break
+    subject = wiki_subject(low)
+    if subject:
+        return lambda history: wiki(subject, low, history)
     if QUESTION_RE.search(low):
         return lambda history: ask(low, history)
     return None
@@ -175,6 +187,75 @@ def _speak_answer(messages: list[dict], num_predict: int = 150, num_ctx: int | N
 def ask(question: str, history: list[dict]) -> Result:
     messages = [{"role": "system", "content": ANSWER_PROMPT}, *history, {"role": "user", "content": question}]
     return _speak_answer(messages)
+
+
+WIKI_RE = re.compile(WIKI)
+WIKI_NOT_SUBJECT_RE = re.compile(WIKI_NOT_SUBJECT)
+WIKI_API = "https://ru.wikipedia.org"
+# скобки с произношением и датами («(26 мая [6 июня] 1799 — …)») вслух звучат плохо
+_BRACKETS_RE = re.compile(r"\s*(?:\([^()]*\)|\[[^\[\]]*\])")
+# конец предложения, но не инициалы: «А. С. Пушкин» не делю
+_SENTENCE_RE = re.compile(r"(?<=\w\w[.!?])\s+(?=[А-ЯЁA-Z0-9«])")
+
+
+def wiki_subject(low: str) -> str | None:
+    """«кто такой Пушкин» -> «пушкин»; None, если это не вопрос о предмете."""
+    if not WIKI_ENABLED:
+        return None
+    m = WIKI_RE.match(low)
+    if not m or WIKI_NOT_SUBJECT_RE.match(m.group("subject")):
+        return None
+    return m.group("subject")
+
+
+def _wiki_summary(title: str) -> dict | None:
+    """Выжимка статьи; None - статьи нет. Редиректы API разворачивает сам."""
+    try:
+        data = _http_json(f"{WIKI_API}/api/rest_v1/page/summary/{urllib.parse.quote(title.replace(' ', '_'))}",
+                          timeout=4)
+    except Exception as e:                      # 404 - статьи с таким названием нет
+        log("Википедия", f"{title}: {e}")
+        return None
+    return data if data.get("extract") else None
+
+
+def _wiki_search(subject: str) -> str | None:
+    """Ближайшая статья по поиску («пушкин» -> «Пушкин, Александр Сергеевич»).
+    Беру, только если в названии есть слово из вопроса: поиск находит что-нибудь почти на любую фразу."""
+    query = urllib.parse.urlencode({"action": "query", "list": "search", "srsearch": subject,
+                                    "srlimit": 1, "format": "json"})
+    try:
+        found = _http_json(f"{WIKI_API}/w/api.php?{query}", timeout=4)["query"]["search"]
+    except Exception as e:
+        log("Википедия", f"поиск {subject}: {e}")
+        return None
+    if not found:
+        return None
+    title = found[0]["title"]
+    stems = {w[:4] for w in re.findall(r"\w{3,}", subject.lower())}
+    return title if any(w[:4] in stems for w in re.findall(r"\w{3,}", title.lower())) else None
+
+
+def wiki_text(subject: str) -> str | None:
+    """Первые предложения статьи для чтения вслух или None."""
+    data = _wiki_summary(subject)
+    if data is None or data.get("type") == "disambiguation":
+        title = _wiki_search(subject)
+        data = _wiki_summary(title) if title else None
+    if data is None or data.get("type") == "disambiguation":
+        return None
+    text = _BRACKETS_RE.sub("", data["extract"].replace("́", ""))
+    text = " ".join(_SENTENCE_RE.split(" ".join(text.split()))[:WIKI_SENTENCES])
+    log("Википедия", f"{subject} -> {data.get('title')}")
+    return text or None
+
+
+def wiki(subject: str, question: str, history: list[dict]) -> Result:
+    """Википедия точнее маленькой локальной модели; статьи нет - спрашиваю модель."""
+    text = wiki_text(subject)
+    if text is None:
+        return ask(question, history)
+    return f"{RAW}{text}", text
 
 
 def _screenshot() -> bytes:

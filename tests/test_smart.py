@@ -15,13 +15,18 @@ def route(text: str):
         return "screen"
     if "on_selection" in names:
         return "selection:" + action.__defaults__[0]
+    if "wiki" in names:
+        return "wiki"
     return "ask"
 
 
 @pytest.mark.parametrize("phrase,expected", [
     # вопросы
-    ("что такое квантовая запутанность", "ask"),
-    ("кто такой Пушкин", "ask"),
+    ("что такое квантовая запутанность", "wiki"),
+    ("кто такой пушкин", "wiki"),
+    ("а кто такая анна ахматова", "wiki"),
+    ("что такое с тобой", "ask"),               # не предмет статьи - сразу к модели
+    ("что такое это", "ask"),
     ("почему небо голубое", "ask"),
     ("объясни теорию относительности", "ask"),
     ("переведи на английский как дела", "ask"),
@@ -167,3 +172,56 @@ def test_target_lang(low, text, lang):
 def test_long_text_gets_bigger_context():
     assert smart._ctx_for("коротко") is None
     assert smart._ctx_for("а" * 3000) >= 2500
+
+
+def _fake_wiki(monkeypatch, pages: dict, search: list[str] | None = None):
+    """Подменяю сеть: pages - название -> ответ summary; search - что вернёт поиск."""
+    def http_json(url, timeout=6.0):
+        if "list=search" in url:
+            return {"query": {"search": [{"title": t} for t in (search or [])]}}
+        title = smart.urllib.parse.unquote(url.rsplit("/", 1)[1]).replace("_", " ")
+        if title not in pages:
+            raise OSError("HTTP Error 404")
+        return pages[title]
+    monkeypatch.setattr(smart, "_http_json", http_json)
+    monkeypatch.setattr(smart, "ask", lambda question, history: (None, "модель"))
+
+
+def test_wiki_reads_first_sentences(monkeypatch):
+    extract = ("Фотоси́нтез (от др.-греч. φῶς — свет) — процесс образования органических веществ. "
+               "Идёт на свету. Третье предложение.")
+    _fake_wiki(monkeypatch, {"фотосинтез": {"type": "standard", "title": "Фотосинтез", "extract": extract}})
+    phrase, said = smart.wiki("фотосинтез", "что такое фотосинтез", [])
+    assert said == "Фотосинтез — процесс образования органических веществ. Идёт на свету."
+    assert phrase == smart.RAW + said
+
+
+def test_wiki_initials_are_not_sentence_end(monkeypatch):
+    extract = "А. С. Пушкин — русский поэт. Второе. Третье."
+    _fake_wiki(monkeypatch, {"Пушкин, Александр Сергеевич": {"title": "Пушкин", "extract": extract}},
+               search=["Пушкин, Александр Сергеевич"])
+    assert smart.wiki_text("пушкин") == "А. С. Пушкин — русский поэт. Второе."
+
+
+def test_wiki_disambiguation_uses_search(monkeypatch):
+    _fake_wiki(monkeypatch, {
+        "пушкин": {"type": "disambiguation", "extract": "Пушкин — фамилия."},
+        "Пушкин, Александр Сергеевич": {"type": "standard", "extract": "Русский поэт."},
+    }, search=["Пушкин, Александр Сергеевич"])
+    assert smart.wiki_text("пушкин") == "Русский поэт."
+
+
+def test_wiki_unrelated_search_result_goes_to_model(monkeypatch):
+    """Поиск находит что-нибудь почти на любую фразу - без общего слова это не ответ."""
+    _fake_wiki(monkeypatch, {"Список чего-то": {"extract": "Не то."}}, search=["Список чего-то"])
+    assert smart.wiki("квазибряк", "что такое квазибряк", []) == (None, "модель")
+
+
+def test_wiki_offline_goes_to_model(monkeypatch):
+    _fake_wiki(monkeypatch, {})
+    assert smart.wiki("фотосинтез", "что такое фотосинтез", []) == (None, "модель")
+
+
+def test_wiki_off(monkeypatch):
+    monkeypatch.setattr(smart, "WIKI_ENABLED", False)
+    assert route("кто такой пушкин") == "ask"
