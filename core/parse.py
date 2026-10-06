@@ -137,6 +137,12 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if m and m.group("letter") in DRIVE_LETTERS:
         return lambda letter=DRIVE_LETTERS[m.group("letter")]: tools.execute_tool("open_drive", {"letter": letter})
 
+    # Недавние файлы - раньше «открой X»: «открой последний документ» не приложение
+    if R["recent_list"].search(seg):
+        return lambda: tools.execute_tool("open_recent", {"show_all": True})
+    if R["recent_file"].search(seg):
+        return lambda: tools.execute_tool("open_recent", {})
+
     # Закрыть активное окно - раньше обычного "закрой X"
     if ACTIVE_CLOSE_RE.match(seg):
         return lambda: tools.execute_tool("close_active", {"window_only": "окно" in seg})

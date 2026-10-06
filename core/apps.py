@@ -240,6 +240,51 @@ def open_folder(name: str) -> str:
     return f"открыл{END} папку {name}"
 
 
+RECENT_DIR = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Recent"
+
+
+def _lnk_targets(links: list[Path]) -> list[str]:
+    """Куда ведут ярлыки. COM открываю здесь же: команду могут выполнить и не из главного потока."""
+    import comtypes
+    import comtypes.client
+
+    comtypes.CoInitialize()
+    try:
+        shell = comtypes.client.CreateObject("WScript.Shell", dynamic=True)
+        targets = []
+        for lnk in links:
+            try:
+                targets.append(shell.CreateShortcut(str(lnk)).TargetPath or "")
+            except Exception:
+                targets.append("")
+        del shell
+        return targets
+    finally:
+        try:
+            comtypes.CoUninitialize()
+        except Exception:
+            pass
+
+
+def open_recent(show_all: bool = False) -> str:
+    """Открывает последний изменённый файл из «Недавних» (%APPDATA%\\Microsoft\\Windows\\Recent).
+    Там ярлыки и на папки, и на удалённые файлы - их пропускаю."""
+    if show_all:
+        os.startfile(str(RECENT_DIR))
+        return f"открыл{END} недавние файлы"
+    try:
+        links = sorted(RECENT_DIR.glob("*.lnk"), key=lambda p: p.stat().st_mtime, reverse=True)[:30]
+    except OSError:
+        links = []
+    if not links:
+        return f"{FAIL}недавних файлов нет: в Windows выключена история недавних файлов"
+    for target in _lnk_targets(links):
+        if target and os.path.isfile(target):
+            os.startfile(target)
+            return f"открыл{END} {Path(target).stem}"
+    return f"{FAIL}недавние файлы уже удалены или перемещены"
+
+
 def _protected() -> tuple[set[int], set[str]]:
     """PID, которые закрывать нельзя: сама Харви и консоль, из которой её запустили."""
     pids, exes = {OWN_PID}, set()
