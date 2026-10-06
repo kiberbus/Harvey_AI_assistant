@@ -10,6 +10,7 @@ import re
 import sounddevice as sd
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from config import (
@@ -18,6 +19,7 @@ from config import (
     BEEP_FREQ,
     BEEP_MS,
     CHIME_IDLE_SEC,
+    NIGHT_HOURS,
     PIPER_VOICE,
     QUIET_MODE,
     SILERO_DEVICE,
@@ -27,6 +29,7 @@ from config import (
     SILERO_SPEAKER,
     SOUND_VOLUME,
     TTS_ENGINE,
+    TTS_MOODS,
     TTS_SPEED,
 )
 from core.util import (  # noqa: F401
@@ -198,18 +201,73 @@ def _tts_ready() -> bool:
     return (_engine == "silero" and _silero_model is not None) or (_engine == "piper" and _piper_voice is not None)
 
 
-def _synthesize_piper(text: str) -> tuple[np.ndarray, int] | None:
+_DEFAULT_MOOD = {"speed": 1.0, "pitch": "medium", "volume": 1.0, "noise": None}
+_mood: str | None = None       # настроение текущей команды (см. speaking_mood)
+
+
+@contextmanager
+def speaking_mood(mood: str | None):
+    """Всё, что скажется внутри, звучит с этой интонацией: «расскажи анекдот» → весёлый ответ ИИ."""
+    global _mood
+    previous, _mood = _mood, mood
+    try:
+        yield
+    finally:
+        _mood = previous
+
+
+def _is_night(hour: int) -> bool:
+    if not NIGHT_HOURS:
+        return False
+    start, end = NIGHT_HOURS
+    return start <= hour or hour < end if start > end else start <= hour < end    # (23, 7) - через полночь
+
+
+def _pick_mood(mood: str | None) -> str | None:
+    """Явное настроение важнее ночного: срочное напоминание и ночью звучит срочно."""
+    mood = mood or _mood
+    if mood is None and _is_night(time.localtime().tm_hour):
+        mood = "night"
+    return mood if mood in TTS_MOODS else None
+
+
+def _prosody(mood: str | None) -> dict:
+    return {**_DEFAULT_MOOD, **TTS_MOODS.get(mood, {})}
+
+
+def _silero_rate(speed: float) -> str:
+    return ("x-fast" if speed >= 1.5 else "fast" if speed >= 1.15 else "medium" if speed >= 0.9
+            else "slow" if speed >= 0.75 else "x-slow")
+
+
+def _silero_ssml(chunk: str, mood: str | None) -> str:
+    from xml.sax.saxutils import escape
+
+    p = _prosody(mood)
+    pitch = f' pitch="{p["pitch"]}"' if p["pitch"] != "medium" else ""
+    return f'<speak><prosody rate="{_silero_rate(TTS_SPEED * p["speed"])}"{pitch}>{escape(chunk)}</prosody></speak>'
+
+
+def _apply_volume(audio: np.ndarray, mood: str | None) -> np.ndarray:
+    volume = _prosody(mood)["volume"]
+    return audio if volume == 1.0 else np.clip(audio * volume, -1.0, 1.0).astype("float32")
+
+
+def _synthesize_piper(text: str, mood: str | None = None) -> tuple[np.ndarray, int] | None:
+    p = _prosody(mood)
+    speed = TTS_SPEED * p["speed"]
     with _piper_lock:
         sr = _piper_voice.config.sample_rate
         rate = sr
         try:
             if SynthesisConfig is None:
                 raise TypeError("SynthesisConfig недоступен")
-            cfg = SynthesisConfig(length_scale=1.0 / TTS_SPEED)      # <1 - быстрее, голос не искажается
+            extra = {"noise_scale": p["noise"]} if p["noise"] is not None else {}
+            cfg = SynthesisConfig(length_scale=1.0 / speed, **extra)    # <1 - быстрее, голос не искажается
             chunks = [c.audio_float_array for c in _piper_voice.synthesize(text, syn_config=cfg)]
         except TypeError:
             chunks = [c.audio_float_array for c in _piper_voice.synthesize(text)]
-            rate = int(sr * TTS_SPEED)                               # запасной вариант: быстрее проигрываем
+            rate = int(sr * speed)                                   # запасной вариант: быстрее проигрываем
     return (np.concatenate(chunks), rate) if chunks else None
 
 
@@ -228,15 +286,12 @@ def _split_sentences(text: str, limit: int = 300) -> list[str]:
     return chunks
 
 
-def _synthesize_silero(text: str) -> tuple[np.ndarray, int] | None:
-    from xml.sax.saxutils import escape
-
-    rate_name = "x-fast" if TTS_SPEED >= 1.5 else "fast" if TTS_SPEED >= 1.15 else "medium"
+def _synthesize_silero(text: str, mood: str | None = None) -> tuple[np.ndarray, int] | None:
     pieces: list[np.ndarray] = []
     with _piper_lock:
         for chunk in _split_sentences(normalize_for_tts(text)):
             kwargs = dict(speaker=SILERO_SPEAKER, sample_rate=SILERO_SAMPLE_RATE)
-            ssml = f'<speak><prosody rate="{rate_name}">{escape(chunk)}</prosody></speak>'
+            ssml = _silero_ssml(chunk, mood)
             for attempt in (dict(ssml_text=ssml, put_accent=True, put_yo=True),
                             dict(text=chunk, put_accent=True, put_yo=True),
                             dict(text=chunk)):
@@ -264,15 +319,17 @@ def _synthesize_foreign(lang: str, text: str) -> tuple[np.ndarray, int] | None:
     return (np.concatenate(pieces), SILERO_SAMPLE_RATE) if pieces else None
 
 
-def _synthesize(text: str) -> tuple[np.ndarray, int] | None:
-    cached = _tts_cache.get(text)
+def _synthesize(text: str, mood: str | None = None) -> tuple[np.ndarray, int] | None:
+    cached = _tts_cache.get((text, mood))
     if cached:
         return cached
-    result = _synthesize_silero(text) if _engine == "silero" else _synthesize_piper(text)
+    result = _synthesize_silero(text, mood) if _engine == "silero" else _synthesize_piper(text, mood)
+    if result:
+        result = (_apply_volume(result[0], mood), result[1])
     if result and len(text) <= 80:
         if len(_tts_cache) >= TTS_CACHE_MAX:
             _tts_cache.pop(next(iter(_tts_cache)))          # выбрасываем самую старую фразу
-        _tts_cache[text] = result
+        _tts_cache[(text, mood)] = result
     return result
 
 
@@ -420,13 +477,13 @@ def _prewarm_tts() -> None:
             return
 
 
-def _enqueue(kind: str, payload: str) -> None:
+def _enqueue(kind: str, payload: str, mood: str | None = None) -> None:
     global _inflight
     with _inflight_lock:
         _inflight += 1
     if kind != "sound":     # сигналы микрофон не «глушат»: их эхо отсеет VAD, а диалог не прервётся
         _speaking.set()
-    _tts_queue.put((kind, payload, _tts_gen))
+    _tts_queue.put((kind, payload, _tts_gen, mood))
 
 
 def _item_done(count: int = 1, tail: bool = True) -> None:
@@ -445,7 +502,7 @@ def _item_done(count: int = 1, tail: bool = True) -> None:
 def _synth_worker() -> None:
     """Синтезирую заранее: пока звучит одно предложение, следующее уже готово."""
     while True:
-        kind, payload, gen = _tts_queue.get()
+        kind, payload, gen, mood = _tts_queue.get()
         audio = None
         if gen == _tts_gen:
             try:
@@ -454,7 +511,7 @@ def _synth_worker() -> None:
                 elif kind != "text":
                     audio = _synthesize_foreign(kind, payload)    # вид - язык перевода
                 elif _tts_ready():
-                    audio = _synthesize(payload)
+                    audio = _synthesize(payload, mood)
                 else:
                     log("TTS", "Голосовая модель не загружена")
             except Exception as e:
@@ -499,15 +556,15 @@ def stop_speaking() -> None:
     _speaking.clear()
 
 
-def speak(text: str) -> None:
-    """Говорит в фоне, управление возвращается сразу."""
+def speak(text: str, mood: str | None = None) -> None:
+    """Говорит в фоне, управление возвращается сразу. mood - ключ TTS_MOODS («urgent», «joke»)."""
     text = address(text)
     if not text:
         return
     print(f"\n{ASSISTANT_NAME}: {text}", flush=True)
     if threading.current_thread() is threading.main_thread():
         _ducker.duck()                      # приглушаем музыку только когда реально говорим
-    _enqueue("text", text)
+    _enqueue("text", text, _pick_mood(mood))    # ночь определяю сейчас, а не когда дойдёт очередь
 
 
 def speak_foreign(text: str, lang: str) -> None:
@@ -562,7 +619,7 @@ def wait_silence() -> None:
         time.sleep(0.02)
 
 
-def speak_sync(text: str) -> None:
+def speak_sync(text: str, mood: str | None = None) -> None:
     """Говорит и ждёт конца (только для коротких вопросов и прощания)."""
-    speak(text)
+    speak(text, mood)
     wait_silence()

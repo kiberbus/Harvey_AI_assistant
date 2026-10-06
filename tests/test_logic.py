@@ -334,3 +334,41 @@ def test_folder_and_site_names():
 def test_close_target_fuzzy(spoken, exe):
     from core import apps
     assert apps._target_exes(spoken) == {exe}
+
+
+@pytest.mark.parametrize("hour,night", [(23, True), (2, True), (6, True), (7, False), (15, False), (22, False)])
+def test_night_hours_wrap_midnight(monkeypatch, hour, night):
+    monkeypatch.setattr(speech, "NIGHT_HOURS", (23, 7))
+    assert speech._is_night(hour) is night
+
+
+def test_mood_explicit_beats_night_and_context(monkeypatch):
+    monkeypatch.setattr(speech, "_is_night", lambda hour: True)
+    assert speech._pick_mood(None) == "night"
+    assert speech._pick_mood("urgent") == "urgent"          # срочное напоминание и ночью срочное
+    with speech.speaking_mood("joke"):
+        assert speech._pick_mood(None) == "joke"
+        assert speech._pick_mood("urgent") == "urgent"
+    assert speech._pick_mood(None) == "night"
+    assert speech._pick_mood("нет такого") is None
+
+
+def test_silero_ssml_by_mood():
+    assert 'pitch="low"' in speech._silero_ssml("Спокойной ночи", "night")
+    assert 'pitch="high"' in speech._silero_ssml("Ха", "joke")
+    assert "pitch" not in speech._silero_ssml("Готово", None)
+    assert speech._silero_ssml("a < b", None).count("&lt;") == 1
+
+
+def test_night_is_quieter_and_urgent_does_not_clip():
+    audio = speech.np.array([0.5, -1.0], dtype="float32")
+    assert abs(speech._apply_volume(audio, "night")).max() < 0.5
+    assert speech._apply_volume(audio, None) is audio
+
+
+@pytest.mark.parametrize("text,joke", [
+    ("расскажи анекдот", True), ("пошути", True), ("расскажи что-нибудь смешное", True),
+    ("расскажи про погоду", False),
+])
+def test_joke_mood_phrase(text, joke):
+    assert bool(util.R["joke"].search(text)) is joke

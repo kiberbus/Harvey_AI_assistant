@@ -140,6 +140,15 @@ WHISPER_HOTWORDS = "Харви Claude Telegram YouTube Яндекс Музыка
 # Синтез речи
 TTS_ENGINE = "silero"            # silero звучит естественнее, piper - запасной (включается сам, если Silero не загрузился)
 TTS_SPEED = 1.3                  # 1.0 - обычная скорость
+# Интонации. speed - множитель к TTS_SPEED; pitch - высота тона Silero (x-low, low, medium, high, x-high);
+# volume - громкость (1.0 - как есть); noise - noise_scale у Piper (0.667 - обычно, больше - живее, меньше - ровнее).
+# У Silero нет length_scale/noise_scale: скорость и тон задаются через SSML, громкость - умножением звука
+TTS_MOODS = {
+    "joke": {"speed": 1.0, "pitch": "high", "volume": 1.0, "noise": 0.9},      # «расскажи анекдот»
+    "urgent": {"speed": 0.85, "pitch": "high", "volume": 1.3, "noise": 0.4},   # таймеры, напоминания: чётко и громче
+    "night": {"speed": 0.8, "pitch": "low", "volume": 0.45, "noise": 0.5},     # ночью тихо и спокойно
+}
+NIGHT_HOURS = (23, 7)            # с 23:00 до 7:00 Харви говорит ночным голосом; None - не менять
 
 PIPER_VOICE = "irina"            # irina / denis / dmitri / ruslan
 

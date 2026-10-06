@@ -114,7 +114,7 @@ def set_timer(seconds: int) -> str:
 
     def ring() -> None:
         play_sound("ready")
-        speak(f"Господин, таймер на {label} сработал.")
+        speak(f"Господин, таймер на {label} сработал.", mood="urgent")
 
     timer = threading.Timer(seconds, ring)
     timer.daemon = True
@@ -351,7 +351,7 @@ def cancel_reminders() -> str:
 def _fire_reminder(reminder: dict, missed: bool) -> None:
     play_sound("ready")
     what = reminder["text"] or "время пришло"
-    speak(f"Господин, {'пропущенное напоминание' if missed else 'напоминаю'}: {what}.")
+    speak(f"Господин, {'пропущенное напоминание' if missed else 'напоминаю'}: {what}.", mood="urgent")
 
 
 def _reminder_loop() -> None:

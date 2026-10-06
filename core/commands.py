@@ -40,6 +40,7 @@ from core.speech import (  # noqa: F401
     speak,
     speak_stream,
     speak_sync,
+    speaking_mood,
     stop_speaking,
 )
 from core.daily import (  # noqa: F401
@@ -265,11 +266,18 @@ def handle_command(command: str) -> bool:
         _reply([a() for a in actions], low)
         return True
 
+    with speaking_mood("joke" if R["joke"].search(low) else None):   # «расскажи анекдот» - весёлым голосом
+        _ask_ai(low)
+    return True
+
+
+def _ask_ai(low: str) -> None:
+    """То, что не поняли правила: вопрос, выделенный текст или Ollama с инструментами."""
     smart_action = smart.parse(fix_hearing(low))
     if smart_action:
         log("ИИ: текст", low)
         run_smart(smart_action, low)
-        return True
+        return
 
     # Остальное - в Ollama. Эти фразы попадают в лог, потом добавляю их в phrases.py
     log("К ИИ", low)
@@ -280,7 +288,6 @@ def handle_command(command: str) -> bool:
     except Exception as e:
         log("Ошибка", str(e))
         _reply([f"{FAIL}произошла ошибка"])
-    return True
 
 
 def run_smart(action: Callable[[list[dict]], smart.Result], low: str) -> None:
