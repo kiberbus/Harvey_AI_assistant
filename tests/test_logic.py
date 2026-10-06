@@ -15,11 +15,11 @@ I, F, R = util.INFO, util.FAIL, util.RAW
 SOURCES = ["harvey.py", "phrases.py", "config.py"] + [f"core/{p.name}" for p in (ROOT / "core").glob("*.py")]
 
 
-# ── целостность: то, что уже ломалось ──
+# целостность: то, что уже ломалось
 
 @pytest.mark.parametrize("name", SOURCES)
 def test_no_control_chars_in_source(name):
-    """Однажды «\\b» в регулярке превратился в невидимый символ Backspace — и фразы перестали работать."""
+    """Однажды обратный слеш с b в регулярке превратился в символ Backspace, и фразы перестали работать."""
     data = (ROOT / name).read_bytes()
     assert b"\x08" not in data and b"\r[" not in data.replace(b"\r\n", b"")
 
@@ -38,7 +38,7 @@ def test_tools_match_functions():
         assert callable(fn), name
 
 
-# ── тихий режим и обращение ──
+# тихий режим и обращение
 
 @pytest.mark.parametrize("phrases_in,expected", [
     (["открыла x"], (None, "done")),
@@ -67,7 +67,7 @@ def test_address_custom_honorific(monkeypatch):
     assert util.address("Господин, да, господин.") == "Сэр, да, сэр."
 
 
-# ── числа ──
+# числа
 
 @pytest.mark.parametrize("text,expected", [
     ("громкость 50", 50), ("пятьдесят", 50), ("двадцать пять", 25), ("сто", 100), ("ничего", None),
@@ -90,7 +90,7 @@ def test_tts_normalization():
     assert util.normalize_for_tts("21 минута") == "двадцать одна минута"
 
 
-# ── напоминания ──
+# напоминания
 
 def _reminder(calls, text):
     calls.clear()
@@ -131,7 +131,7 @@ def test_reminder_without_time_asks_when(calls):
     assert result.startswith(I) and "когда" in result and not calls
 
 
-# ── диалог ──
+# диалог
 
 @pytest.mark.parametrize("text,accepted", [
     ("Пауза.", True), ("Следующий трек", True), ("Запиши привет", True),
@@ -154,7 +154,7 @@ def test_llm_stream_sentence_split(monkeypatch):
     assert said == ["Столица Франции — Париж.", "Это красивый город!", "А ещё там Лувр"]
 
 
-# ── чей это плеер: музыка / YouTube / видео ──
+# чей плеер: музыка / YouTube / видео
 
 FIREFOX = "308046B0AF4A39CB"
 
@@ -179,7 +179,7 @@ def test_kinds_yandex_web_without_title(monkeypatch):
 
 
 def test_kinds_yandex_app_window_does_not_make_video_music(monkeypatch):
-    """Окно ПРИЛОЖЕНИЯ «Яндекс Музыка» — не вкладка браузера: ролик из браузера остаётся видео."""
+    """Окно ПРИЛОЖЕНИЯ «Яндекс Музыка» - не вкладка браузера: ролик из браузера остаётся видео."""
     video = {"app": FIREFOX, "title": "Какой-то ролик", "artist": "Канал", "album": ""}
     assert _kinds(monkeypatch, video, ["Яндекс Музыка"], browser_titles=["Colab — Mozilla Firefox"]) == {"video", "youtube"}
 
@@ -189,7 +189,7 @@ def test_kinds_music_app(monkeypatch):
     assert _kinds(monkeypatch, track, []) == {"music"}
 
 
-# ── ошибки слуха и досрочное распознавание ──
+# ослышки и досрочное распознавание
 
 @pytest.mark.parametrize("heard,fixed", [
     ("напомнив 6 вечера позвонить маме", "напомни в 6 вечера позвонить маме"),
@@ -217,8 +217,8 @@ def test_fix_hearing(heard, fixed):
     ("Харви, открой телеграм", False),
     ("Харви, запиши привет", False),
     ("Харви, громкость 30 и", False),               # явно продолжение
-    ("Харви.", False),                              # одно имя — ждём команду как обычно
-    ("пауза", False),                               # без имени — только в диалоге
+    ("Харви.", False),                              # одно имя - ждём команду как обычно
+    ("пауза", False),                               # без имени - только в диалоге
 ])
 def test_is_quick_command(text, quick):
     assert parse.is_quick_command(text) is quick
@@ -253,7 +253,7 @@ def test_record_utterance_returns_early():
     for block in [loud] * 8 + [quiet] * 30:
         q2.put(block)
     stt.record_utterance(q2, deque(), loud.flatten(), 0.05, lambda a: False)
-    assert 38 - q2.qsize() == 8 + stt.SILENCE_BLOCKS                # команда не законченная — ждём как раньше
+    assert 38 - q2.qsize() == 8 + stt.SILENCE_BLOCKS                # команда не законченная - ждём как раньше
 
 
 def test_sleep_reply_is_just_ok():
@@ -293,7 +293,7 @@ def test_cut_name_whole_name_and_silence_after(pause):
     assert clip is not None
     first, last, total = _voiced_span(clip, sr)
     assert abs((last - first) - 0.48) < 0.03          # имя целиком (0.48 с звука), без следующего слова
-    assert total - last >= 0.3                        # запас тишины — чтобы плеер доиграл «-ви»
+    assert total - last >= 0.3                        # запас тишины - чтобы плеер доиграл «-ви»
 
 
 def test_cut_name_bare_name():
@@ -304,7 +304,7 @@ def test_cut_name_bare_name():
 
 def test_cut_name_skips_when_glued_to_command():
     from core import stt
-    assert stt.cut_name(_harvey_like(stt.SAMPLE_RATE, 0.0)) is None         # «Харвигромкость» — не сохраняем
+    assert stt.cut_name(_harvey_like(stt.SAMPLE_RATE, 0.0)) is None         # «Харвигромкость» - не сохраняем
 
 
 def test_collect_saves_without_whisper(monkeypatch, tmp_path):
@@ -320,7 +320,7 @@ def test_collect_saves_without_whisper(monkeypatch, tmp_path):
     assert len(list(tmp_path.glob("*.wav"))) == 1
 
 
-# ── закрытие: папки и вкладки сайтов ──
+# закрытие папок и вкладок
 
 def test_folder_and_site_names():
     from core import apps

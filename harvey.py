@@ -1,22 +1,8 @@
-"""
-Локальная голосовая помощница «Харви» для Windows 11 на базе Ollama.
+"""Харви - локальная голосовая помощница для Windows.
 
-STT:  faster-whisper (локально)
-TTS:  piper-tts или Silero (локально, выбирается в config.py)
-Wake: непрерывное слушание, «Харви + команда» одной фразой.
-
-Зависимости:
-    python -m pip install -r requirements.txt
-
-Файлы: config.py — все настройки, phrases.py — варианты фраз-команд, harvey.py — код.
-
-Как устроена скорость:
-    1. Простые команды (громкость, пауза, яркость, запись текста, открыть приложение)
-       выполняются напрямую регулярками, без обращения к ИИ.
-    2. К Ollama уходит только то, что не удалось разобрать локально, и ровно ОДИН запрос
-       (ответ собирается кодом, а не вторым проходом модели).
-    3. Частые фразы озвучиваются из кэша, модель Ollama прогревается на старте.
-"""
+Цепочка: микрофон -> имя -> faster-whisper -> правила из phrases.py -> (если не понял) Ollama -> Silero / Piper.
+Простые команды разбираю регулярками без ИИ, так они срабатывают за миллисекунды. В Ollama
+уходит только то, что правила не поняли, и ровно один запрос."""
 
 from __future__ import annotations
 
@@ -124,7 +110,6 @@ import core.stt as stt
 import core.system as system
 import core.tray as tray
 
-# ───────────────────────── ГЛАВНЫЙ ЦИКЛ ─────────────────────────
 def main() -> None:
     if sys.platform != "win32":
         print("Скрипт рассчитан на Windows.")
@@ -137,7 +122,7 @@ def main() -> None:
     except Exception:
         pass
     setup_logging()
-    try:      # падение в C-коде (ctypes, CUDA) не оставляет следов в логе — пусть хотя бы стек Python
+    try:      # падение в C-коде (ctypes, CUDA) в лог не попадает, так хотя бы будет стек
         crash_log = BASE_DIR / "crash.log"
         if crash_log.exists() and crash_log.stat().st_size > LOG_MAX_MB * 1024 * 1024:
             crash_log.replace(crash_log.with_name("crash.log.1"))     # храним одну прошлую копию
@@ -145,10 +130,10 @@ def main() -> None:
     except Exception:
         pass
     if not _single_instance():
-        log("Система", f"{ASSISTANT_NAME} уже запущен{'а' if FEMALE_VOICE else ''} — второй экземпляр не нужен.")
+        log("Система", f"{ASSISTANT_NAME} уже запущен{'а' if FEMALE_VOICE else ''} - второй экземпляр не нужен.")
         return
 
-    _ducker.recover()                        # музыка осталась тихой после прошлого запуска? вернём
+    _ducker.recover()                        # если в прошлый раз музыка осталась тихой - возвращаю
     threading.Thread(target=_synth_worker, daemon=True).start()
     threading.Thread(target=_play_worker, daemon=True).start()
     threading.Thread(target=_load_start_apps, daemon=True).start()
@@ -163,14 +148,14 @@ def main() -> None:
 
     _wake.load()
     start_reminders()
-    if system.mic_muted():                   # проверяем здесь, в главном потоке: трей к микрофону не обращается
-        log("Система", "Микрофон выключен — включите его в меню значка у часов.")
+    if system.mic_muted():                   # проверяю в главном потоке: трей к микрофону не обращается
+        log("Система", "Микрофон выключен - включите его в меню значка у часов.")
     start_tray()
 
     log("Система", "Жду загрузки Whisper...")
     _whisper_ready.wait()
     if stt._whisper_model is None:
-        log("STT", "Whisper не загрузился ни на видеокарте, ни на процессоре — выхожу.")
+        log("STT", "Whisper не загрузился ни на видеокарте, ни на процессоре - выхожу.")
         return
 
     log("Система", "Калибрую микрофон...")
@@ -187,16 +172,16 @@ def main() -> None:
     audio_q: queue.Queue = queue.Queue()
     pre_buffer: deque = deque(maxlen=PRE_BUFFER_BLOCKS)
     ducker = _ducker
-    dialog_until = 0.0                       # до какого момента слушаем без «Харви» (0 — окно закрыто)
+    dialog_until = 0.0                       # до какого момента слушаем без «Харви» (0 - окно закрыто)
 
     def audio_callback(indata, frames, time_info, status):
-        audio_q.put(indata.copy())          # слушаем всегда: так Харви можно перебить на полуслове
+        audio_q.put(indata.copy())          # слушаю всегда, чтобы Харви можно было перебить
 
     try:
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
                             blocksize=BLOCK_SIZE, callback=audio_callback):
             while not _quit_event.is_set():
-                # Музыку возвращаем на место, как только Харви договорила
+                # Возвращаю громкость музыки, как только Харви договорила
                 if ducker.active and (not _speaking.is_set() or ducker.stale):
                     ducker.restore()
                 _chimes.close_if_idle()
@@ -207,7 +192,7 @@ def main() -> None:
                         play_sound("ready")
                     except Exception as e:
                         log("Система", f"не удалось включить микрофон: {e}")
-                # Окно диалога отсчитываем с момента, когда Харви замолчала
+                # Окно диалога отсчитываю с момента, когда Харви замолчала
                 if dialog_until:
                     if _speaking.is_set():
                         dialog_until = max(dialog_until, time.time() + DIALOG_TIMEOUT)
@@ -225,13 +210,13 @@ def main() -> None:
                     pre_buffer.append(block)
                     continue
 
-                # Без имени слушаем, только пока Харви молчит: иначе она услышит саму себя
+                # Без имени слушаю, только пока Харви молчит, иначе она услышит сама себя
                 dialog_open = bool(dialog_until) and not speaking
-                _chimes.warm()                       # пока вы говорите, готовим звук «готово» — он прозвучит без задержки
+                _chimes.warm()                       # пока человек говорит, готовлю звук готово, чтобы он прозвучал без задержки
                 early: dict[str, str] = {}
 
                 def early_check(candidate: np.ndarray) -> bool:
-                    # После короткой паузы: если это законченная команда («пауза», «громкость 30») — не ждём дальше
+                    # Короткая пауза и законченная команда ("пауза", "громкость 30") - дальше не жду
                     if daily._sleeping or (_wake.enabled and not _wake.peek() and not dialog_open):
                         return False
                     guess = transcribe(candidate)
@@ -246,13 +231,13 @@ def main() -> None:
                 heard_name = _wake.take()
                 if audio is None:
                     continue
-                # Детектор имени включён: без имени Whisper нужен только в диалоге, при «да/нет»
-                # и чтобы услышать «стоп», пока Харви говорит
+                # С детектором имени Whisper нужен только в диалоге, при да/нет
+                # и чтобы услышать "стоп", пока Харви говорит
                 if _wake.enabled and WAKE_GATE and not heard_name and not (
                         (dialog_open or daily._pending is not None or speaking) and not daily._sleeping):
                     continue
 
-                heard_at = time.time()               # фраза закончилась — отсюда считаем задержку
+                heard_at = time.time()               # фраза закончилась - отсюда считаем задержку
                 text = early.get("text") or transcribe(audio)
                 stt_sec = time.time() - heard_at
                 low = text.lower()
@@ -262,9 +247,9 @@ def main() -> None:
 
                 m = WAKE_PATTERN.search(low)
                 named = m is not None or heard_name
-                if m and m.start() <= 2:                     # «Харви, …» — сохраняем само имя для обучения модели
+                if m and m.start() <= 2:                     # сохраняю само имя для обучения модели
                     collect_name_sample(audio)
-                if m and _wake.enabled and not heard_name:   # Whisper слышит имя, а модель — нет: видно в логе
+                if m and _wake.enabled and not heard_name:   # Whisper слышит имя, а модель нет - пишу в лог
                     log("Wake", f"модель не узнала имя (уверенность {_wake.last_peak:.2f}, порог {WAKE_THRESHOLD})")
                 if m:
                     after_name = text[m.end():]
@@ -274,7 +259,7 @@ def main() -> None:
                     after_name = text
                 body = " ".join(re.sub(r"[^\w\s]", " ", after_name.lower()).split())
 
-                # Режим сна: слушаем только «Харви, проснись»
+                # Режим сна: слушаю только "Харви, проснись"
                 if daily._sleeping:
                     dialog_until = 0.0
                     if named and R["wake_up"].search(low):
@@ -287,13 +272,13 @@ def main() -> None:
                             _say(f"Я {WOKE}, господин.")
                     continue
 
-                # «Стоп», «заткнись», «хватит» — она сразу замолкает (имя можно не называть)
+                # "стоп", "хватит" - замолкает сразу, имя не нужно
                 if (speaking or _speaking.is_set()) and (SILENCE_RE.match(body) or STOP_RE.match(body)):
                     stop_speaking()
                     log("Система", "Речь прервана.")
                     continue
 
-                # Ответ на «Вы уверены?» — имя называть не нужно
+                # Ответ на "Вы уверены?" - без имени
                 if daily._pending is not None:
                     if time.time() > daily._pending["deadline"]:
                         clear_pending()
@@ -311,7 +296,7 @@ def main() -> None:
                             _say("Хорошо, господин, отменяю.")
                         continue
 
-                # «Всё», «спасибо», «отбой» — закрыть окно диалога
+                # "всё", "спасибо" - закрыть окно диалога
                 if (named or dialog_open) and DIALOG_END_RE.match(body):
                     if dialog_until:
                         dialog_until = 0.0
@@ -332,12 +317,12 @@ def main() -> None:
                     stop_speaking()                  # новая команда важнее: не ждём конца прошлой фразы
 
                 if not command:
-                    ducker.duck()                    # приглушаем музыку, пока вы говорите команду
+                    ducker.duck()                    # приглушаю музыку, пока человек говорит команду
                     if WAKE_BEEP:
-                        play_beep()                  # сигнал «слушаю» вместо фразы — реакция мгновенная
+                        play_beep()                  # сигнал «слушаю» вместо фразы - реакция мгновенная
                     else:
                         speak_sync("Да, господин?")
-                    drain(audio_q)                   # выбросить эхо собственного сигнала
+                    drain(audio_q)                   # выбрасываю эхо своего сигнала
                     cmd_audio = record_command(audio_q, threshold)
                     heard_at = time.time()
                     command = transcribe(cmd_audio).strip() if cmd_audio is not None else ""
@@ -353,7 +338,7 @@ def main() -> None:
                 started = time.time()
                 if not handle_command(command):
                     break
-                # Для отчёта по логу: где теряется время — в распознавании или в выполнении (ИИ)
+                # Для отчёта: где теряется время - в распознавании или в ИИ
                 log("Время", f"распознавание {stt_sec:.2f} с, команда {time.time() - started:.2f} с")
                 if DIALOG_MODE and not daily._sleeping:
                     dialog_until = time.time() + DIALOG_TIMEOUT
@@ -368,8 +353,8 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    # Обычный выход выгружает CUDA (Whisper, torch), и на этом процесс падает (0xc0000409 в журнале Windows).
-    # Всё нужное уже сделано в main(), поэтому выходим сразу.
+    # Обычный выход при выгрузке CUDA падает с 0xc0000409. Всё нужное уже сделано в main(),
+    # поэтому выхожу сразу через os._exit.
     logging.shutdown()
     sys.stdout.flush()
     os._exit(0)

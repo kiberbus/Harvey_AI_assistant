@@ -33,8 +33,7 @@ def chat(messages: list[dict], tools: list | None = None, num_predict: int = 120
 
 def chat_stream(messages: list[dict], tools: list | None = None, num_predict: int = 120,
                 num_ctx: int | None = None):
-    """Потоковый ответ модели. Ошибка «think не поддерживается» вылезает при первом чанке —
-    тогда повторяем без think (только если ещё ничего не успели получить)."""
+    """Потоковый ответ. Ошибка про think приходит только на первом чанке, тогда повторяю без think."""
     kwargs = _kwargs(messages, tools, num_predict, num_ctx)
     started = False
     try:

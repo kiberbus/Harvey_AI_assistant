@@ -51,7 +51,7 @@ except Exception:  # без piper можно работать на Silero
 
 try:
     from piper import SynthesisConfig
-except Exception:  # старая версия piper — скорость речи тогда регулируем частотой воспроизведения
+except Exception:  # старая версия piper - скорость речи тогда регулируем частотой воспроизведения
     SynthesisConfig = None
 
 try:
@@ -64,18 +64,15 @@ try:
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume, IAudioMeterInformation
 
     HAS_PYCAW = True
-except Exception:  # pycaw не установлен — громкость и приглушение будут недоступны
+except Exception:  # pycaw не установлен - громкость и приглушение будут недоступны
     HAS_PYCAW = False
 
-# ───────────────────────── НАСТРОЙКИ И ФРАЗЫ ─────────────────────────
-# Настройки лежат в config.py, варианты фраз-команд — в phrases.py (импортированы выше)
 
 END = "а" if FEMALE_VOICE else ""
 WOKE = "проснулась" if FEMALE_VOICE else "проснулся"
 PIPER_DIR = BASE_DIR / "piper"
 PIPER_MODEL = PIPER_DIR / f"ru_RU-{PIPER_VOICE}-medium.onnx"
 
-# ───────────────────────── СЛУЖЕБНОЕ ─────────────────────────
 OWN_PID = os.getpid()
 FAIL = "!"                            # префикс фразы-ошибки внутри инструментов
 PUNCT = " ,.!?:;-—–…"
@@ -101,7 +98,7 @@ SITE_PATTERNS = tuple((site, re.compile(p)) for site, p in SITE_ALIASES.items())
 SITE_MENTION_RE = re.compile(rf"\b(?:(?:на|в|во)\s+)?(?:{YT}|{GOOGLE}|интернет\w*)(?=\s|$)")
 # Короткие формы: «ютуб котики», «гугл погода в лондоне», «найди рецепт борща»
 SHORT_SEARCH_RE = re.compile(rf"^(?:(?:на|в|во)\s+)?(?P<site>{YT}|{GOOGLE})[\s,:—-]+(?P<query>.+)$")
-# «открой в браузере калькулятор матриц», «калькулятор матриц в браузере» — поиск в Google
+# «открой в браузере калькулятор матриц», «калькулятор матриц в браузере» - поиск в Google
 IN_BROWSER_RE = re.compile(r"^(?:(?:открой|найди|поищи|покажи|набери)\s+)?(?:(?:в|во)\s+(?:браузере|интернете)[\s,:—-]+"
                            r"(?P<q1>.+)|(?P<q2>.+?)[\s,]+(?:в|во)\s+(?:браузере|интернете))$")
 BARE_SEARCH_RE = re.compile(r"^(?:найди|поищи)\s+(?:(?:в|во)\s+интернете?\s+)?(?P<query>.+)$")
@@ -120,8 +117,8 @@ SHORTCUT_RES = tuple((action, _rx(patterns)) for action, patterns in SHORTCUTS.i
 BACK_OR_PREVIOUS_RE = re.compile(BACK_OR_PREVIOUS)
 DRIVE_RE = re.compile(DRIVE)
 
-INFO = "~"                            # префикс «информационной» фразы: её произносим даже в кратком режиме
-RAW = "="                             # префикс фразы, которую говорим как есть, без «Слушаюсь, господин»
+INFO = "~"                            # префикс фразы, которую говорю даже в тихом режиме
+RAW = "="                             # префикс фразы, которую говорю как есть
 
 # Прерывание речи: «стоп», «заткнись», «хватит» ...
 SILENCE_RE = re.compile(
@@ -153,7 +150,7 @@ _logger = logging.getLogger("harvey")
 
 
 def setup_logging() -> None:
-    """Пишет всё в harvey.log (с ротацией) — по нему удобно разбирать, что она не поняла."""
+    """Пишет в harvey.log с ротацией - по нему я разбираю, что она не поняла."""
     if not LOG_ENABLED or _logger.handlers:
         return
     handler = RotatingFileHandler(LOG_FILE, maxBytes=int(LOG_MAX_MB * 1024 * 1024),
@@ -171,9 +168,9 @@ def log(tag: str, message: str) -> None:
 
 
 def compose(phrases: list[str]) -> str:
-    """Собирает итоговую фразу из результатов инструментов без повторного обращения к ИИ."""
+    """Собирает итоговую фразу из результатов инструментов, без второго запроса к ИИ."""
     for p in phrases:
-        if p.startswith(RAW):                       # вопрос-подтверждение и т.п. — без «Слушаюсь, господин»
+        if p.startswith(RAW):                       # вопрос-подтверждение и т.п. - без «Слушаюсь, господин»
             return p[1:]
     failed = any(p.startswith(FAIL) for p in phrases)
     clean = [p.lstrip(FAIL + INFO) for p in phrases]
@@ -187,8 +184,7 @@ def compose(phrases: list[str]) -> str:
 
 
 def compose_quiet(phrases: list[str]) -> tuple[str | None, str | None]:
-    """Тихий режим: (что сказать вслух или None, какой звук сыграть или None).
-    Обычное действие — только звук «готово»; вслух — сведения, ошибки и вопросы."""
+    """Тихий режим: (что сказать или None, какой звук или None)."""
     for p in phrases:
         if p.startswith(RAW):
             return p[1:], None
@@ -208,7 +204,7 @@ _HONORIFIC_RE = re.compile(r"\bгосподин\b", re.IGNORECASE)
 
 
 def address(text: str) -> str:
-    """Подставляет обращение из config.py (или убирает его): фразы в коде пишутся с «господин»."""
+    """Подставляет обращение из config.py или убирает его. В коде везде пишу "господин"."""
     if USE_HONORIFIC:
         if HONORIFIC == "господин":
             return text
@@ -223,7 +219,6 @@ def _clamp(value: float, lo: int = 0, hi: int = 100) -> int:
     return max(lo, min(hi, int(round(float(value)))))
 
 
-# ───────────────────────── ЧИСЛА ПРОПИСЬЮ ─────────────────────────
 _UNITS = {
     "ноль": 0, "один": 1, "одну": 1, "два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5,
     "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10, "одиннадцать": 11,
@@ -249,7 +244,7 @@ def parse_number(text: str) -> int | None:
     return total
 
 
-# ───────────────────────── ЧИСЛА И ЛАТИНИЦА ДЛЯ ГОЛОСА (нужно Silero) ─────────────────────────
+# Числа и латиница словами (Silero их не читает)
 _ONES = ["ноль", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять", "десять",
          "одиннадцать", "двенадцать", "тринадцать", "четырнадцать", "пятнадцать", "шестнадцать",
          "семнадцать", "восемнадцать", "девятнадцать"]
@@ -291,7 +286,7 @@ def _below_thousand(n: int, fem: bool = False) -> list[str]:
 
 
 def int_to_words(n: int, fem: bool = False, acc: bool = False) -> str:
-    """21 → «двадцать один»; fem — женский род («две минуты»); acc — «одну минуту»."""
+    """21 → «двадцать один»; fem - женский род («две минуты»); acc - «одну минуту»."""
     if n == 0:
         return "ноль"
     parts: list[str] = []
@@ -329,7 +324,7 @@ def _num_repl(m: re.Match) -> str:
 
 
 def normalize_for_tts(text: str) -> str:
-    """Silero не читает цифры и латиницу — превращаем их в русские слова."""
+    """Silero не читает цифры и латиницу - превращаем их в русские слова."""
     text = _NUM_RE.sub(_num_repl, text)
     text = re.sub(r"[A-Za-z][A-Za-z']*", lambda m: _LATIN.get(m.group().lower()) or _translit(m.group()), text)
     return text.replace("%", " процентов")

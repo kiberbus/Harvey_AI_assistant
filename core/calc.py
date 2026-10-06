@@ -1,8 +1,6 @@
-"""Вычисления без ИИ: проценты, арифметика, перевод единиц и валют.
+"""Вычисления без ИИ: проценты, арифметика, единицы, валюты.
 
-«сколько будет 15 процентов от 3200», «2 плюс 2 умножить на 3», «корень из 144»,
-«5 миль в километрах», «сколько сантиметров в дюйме», «100 фаренгейт в цельсии»,
-«5 долларов в тенге», «доллар к тенге»."""
+Примеры: "15 процентов от 3200", "корень из 144", "5 миль в километрах", "5 долларов в тенге"."""
 
 from __future__ import annotations
 
@@ -34,11 +32,11 @@ from core.util import (  # noqa: F401
 
 NUM = r"-?\d+(?:\.\d+)?"
 
-# ───────────────────────── ЧИСЛА ПРОПИСЬЮ → ЦИФРЫ ─────────────────────────
+# Числа словами -> цифры
 _HUNDREDS = {"сто": 100, "двести": 200, "триста": 300, "четыреста": 400, "пятьсот": 500,
              "шестьсот": 600, "семьсот": 700, "восемьсот": 800, "девятьсот": 900}
 _EXTRA = {"одна": 1, "одной": 1, "одного": 1, "одном": 1, "полтора": 1.5, "полторы": 1.5,
-          # «15 процентов от трёх тысяч двухсот» — числа в родительном падеже
+          # родительный падеж: "15 процентов от трёх тысяч двухсот"
           "двух": 2, "трех": 3, "четырех": 4, "пяти": 5, "шести": 6, "семи": 7, "восьми": 8, "девяти": 9,
           "десяти": 10, "одиннадцати": 11, "двенадцати": 12, "тринадцати": 13, "четырнадцати": 14,
           "пятнадцати": 15, "шестнадцати": 16, "семнадцати": 17, "восемнадцати": 18, "девятнадцати": 19,
@@ -68,7 +66,7 @@ def _scale_after_digit(m: re.Match) -> str:
 
 
 def words_to_digits(text: str) -> str:
-    """«три тысячи двести» → «3200», «пятнадцать процентов» → «15 процентов», «2 тысячи» → «2000»."""
+    """"три тысячи двести" -> "3200", "2 тысячи" -> "2000"."""
     tokens = text.split()
     out: list[str] = []
     i = 0
@@ -78,11 +76,11 @@ def words_to_digits(text: str) -> str:
             value, scale = _word_value(tokens[j]), _scale(tokens[j])
             if value is None and not used and j + 1 < len(tokens) and _scale(tokens[j + 1]) \
                     and re.fullmatch(NUM, tokens[j]):
-                value = float(tokens[j])             # «2 миллиона», «2 тысячи триста» — цифра перед словом
+                value = float(tokens[j])             # цифра перед словом: "2 миллиона", "2 тысячи триста"
             if value is not None:
                 group += value
             elif scale is not None:
-                total += (group or 1) * scale        # «тысяча» без числа — это 1000
+                total += (group or 1) * scale        # "тысяча" без числа = 1000
                 group = 0
             else:
                 break
@@ -98,7 +96,7 @@ def words_to_digits(text: str) -> str:
 
 
 def normalize(text: str) -> str:
-    """Нижний регистр, числа цифрами, «3,5» → «3.5», «3 200» → «3200», «15%» → «15 процентов»."""
+    """Нормализация: нижний регистр, числа цифрами, "3,5" -> "3.5", "15%" -> "15 процентов"."""
     text = text.lower().replace("ё", "е")
     text = re.sub(r"(?<=\d),(?=\d)", ".", text)
     text = re.sub(r"[,!?;:]", " ", text)
@@ -107,14 +105,13 @@ def normalize(text: str) -> str:
     return " ".join(words_to_digits(" ".join(text.split())).split())
 
 
-# ───────────────────────── ВЫВОД ЧИСЕЛ ─────────────────────────
 def plain(x: float) -> str:
-    """Для разбора: 3200.0 → «3200», 0.5 → «0.5»."""
+    """3200.0 -> "3200" (для разбора)."""
     return str(int(round(x))) if abs(x - round(x)) < 1e-9 else repr(x)
 
 
 def spoken(x: float) -> str:
-    """Для ответа: 8.04672 → «8,05», 0.000254 → «0,000254», 1e6 → «1000000»."""
+    """Для ответа вслух: 8.04672 -> "8,05"."""
     if abs(x - round(x)) < 1e-9 or abs(x) >= 1e6:
         return str(int(round(x)))
     if abs(x) >= 100:
@@ -130,22 +127,21 @@ PERCENT = ("процент", "процента", "процентов")
 
 
 def with_unit(x: float, forms: tuple[str, str, str]) -> str:
-    """«1 километр», «2 километра», «5 километров», «8,05 километра» (дробь — как «двух»)."""
+    """Согласование: 1 километр, 2 километра, 5 километров, 8,05 километра."""
     text = spoken(x)
     if "," in text:
         return f"{text} {forms[1]}"
     return f"{text} {_plural(abs(int(text)), *forms)}"
 
 
-# ───────────────────────── ПРОЦЕНТЫ И АРИФМЕТИКА ─────────────────────────
 _PERCENT_OF_RE = re.compile(rf"^(?P<p>{NUM}) процент\w* (?:от|из) (?P<n>{NUM})$")
 _PERCENT_ADD_RE = re.compile(rf"^(?P<n>{NUM}) (?P<op>плюс|минус) (?P<p>{NUM}) процент\w*$")
 _PERCENT_SHARE_RE = re.compile(rf"^(?:сколько )?процент\w* (?:составляет |будет )?(?P<a>{NUM}) (?:от|из) (?P<b>{NUM})$")
-_OPERATOR_RES = [   # у слов — границы слова («х» не должен срабатывать внутри «хорошо»), у знаков — нет
+_OPERATOR_RES = [   # у слов нужны границы, иначе "х" сработает внутри "хорошо"
     (re.compile("|".join(rf"(?<!\w){alt}(?!\w)" if alt[0].isalpha() else alt for alt in words.split("|"))), sign)
     for words, sign in CALC_OPERATORS.items()
 ]
-# Степень пишем как «^», чтобы замена «*» на умножение её не разорвала; в «**» превращаем в конце
+# Степень временно пишу как ^, чтобы её не разорвала замена "*"; в ** превращаю в конце
 _POWER_RES = [
     (re.compile(r"\s*в квадрате\b"), "^2"),
     (re.compile(r"\s*в кубе\b"), "^3"),
@@ -173,7 +169,7 @@ def _eval(node: ast.AST) -> float:
 
 
 def _expression(text: str) -> str | None:
-    """«2 плюс 2 умножить на 3» → «2 + 2 * 3». Остались посторонние слова — None."""
+    """"2 плюс 2 умножить на 3" -> "2 + 2 * 3". Если остались лишние слова - None."""
     text = _ROOT_RE.sub(lambda m: f"({m.group('n')})^0.5", text)
     for rx, repl in _POWER_RES:
         text = rx.sub(lambda m, r=repl: r or f"^{m.group('e') or m.group('e2')}", text)
@@ -219,7 +215,6 @@ def _arithmetic(text: str) -> Callable[[], str] | None:
     return lambda: f"{INFO}{spoken(value)}"
 
 
-# ───────────────────────── ЕДИНИЦЫ ИЗМЕРЕНИЯ ─────────────────────────
 _UNIT_TABLE = [(re.compile(pattern), category, factor, forms) for pattern, category, factor, forms in UNITS]
 _U = "|".join(f"(?:{p})" for p, *_ in sorted(UNITS, key=lambda u: -len(u[0])))
 _UNIT_A_RE = re.compile(rf"^(?:(?P<n>{NUM}) )?(?P<u1>{_U}) (?:в|во|на) (?P<u2>{_U})$")
@@ -253,7 +248,6 @@ def _units(text: str, how_many: bool) -> Callable[[], str] | None:
     return lambda: f"{INFO}{with_unit(n, src[2])} — это {with_unit(result, dst[2])}"
 
 
-# ───────────────────────── ВАЛЮТЫ ─────────────────────────
 _CURRENCY_CONVERT_RE = re.compile(CURRENCY_CONVERT)
 
 
@@ -296,12 +290,11 @@ def _currency_convert(text: str) -> Callable[[], str] | None:
     return run
 
 
-# ───────────────────────── ВХОД ─────────────────────────
 _PREFIX_RE = re.compile(CALC_PREFIX)
 
 
 def parse(text: str) -> Callable[[], str] | None:
-    """Вычисление, которое можно сделать без ИИ? Возвращает действие (строка ответа) или None."""
+    """Возвращает действие, если это можно посчитать без ИИ, иначе None."""
     text = normalize(text)
     m = _PREFIX_RE.match(text)
     how_many = bool(m) and m.group().strip().endswith("сколько")

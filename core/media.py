@@ -1,4 +1,4 @@
-"""Плееры через Windows (SMTC): пауза/продолжить у нужного плеера, «что играет», громкость приложений."""
+"""Плееры через Windows SMTC: пауза у нужного плеера, "что играет", громкость приложений."""
 
 from __future__ import annotations
 
@@ -54,10 +54,9 @@ from core.apps import (  # noqa: F401
 )
 
 
-# ───────────────────────── МЕДИА: КОНКРЕТНЫЕ ПЛЕЕРЫ (Windows SMTC) ─────────────────────────
-# Через системные медиасеансы (виджет с плеером рядом с громкостью) видно каждый плеер отдельно:
-# приложение, название, исполнителя, играет он или на паузе. Так «музыка стоп» ставит на паузу
-# именно музыку, а результат проверяется. Без пакета winrt — старые медиа-клавиши.
+# Через SMTC видно каждый плеер отдельно: приложение, трек, играет или на паузе.
+# Поэтому "музыка стоп" ставит на паузу именно музыку, и результат можно проверить.
+# Без пакета winrt остаются только медиа-клавиши.
 try:
     from winrt.windows.media.control import (
         GlobalSystemMediaTransportControlsSessionManager as _SMTCManager,
@@ -73,9 +72,9 @@ _smtc_lock = threading.Lock()
 
 
 def _smtc_run(coro, timeout: float = 20.0):
-    """Выполняет корутину SMTC в одном постоянном потоке (MTA) со своим циклом asyncio.
-    Раньше каждый вызов шёл через asyncio.run() из главного потока, где comtypes включил STA, —
-    WinRT на каждом шаге бросал RPC_E_WRONG_THREAD (0x8001010e), и faulthandler засорял ими crash.log."""
+    """Все вызовы SMTC идут через один поток MTA со своим циклом asyncio.
+    Сначала я делал asyncio.run() из главного потока, но там comtypes включил STA, и WinRT
+    на каждом шаге падал с RPC_E_WRONG_THREAD (0x8001010e)."""
     global _smtc_loop
     with _smtc_lock:
         if _smtc_loop is None:
@@ -99,7 +98,7 @@ def _smtc_run(coro, timeout: float = 20.0):
     return asyncio.run_coroutine_threadsafe(coro, _smtc_loop).result(timeout)
 _MUSIC_SITES_RE = re.compile(MUSIC_SITES, re.IGNORECASE)
 _TARGET_NAMES = {"music": "музыка", "youtube": "ютуб", "video": "видео"}
-_paused_by_me: list[tuple[str, str]] = []     # (приложение, название) — что Харви поставила на паузу последним
+_paused_by_me: list[tuple[str, str]] = []     # (приложение, название) - что Харви поставила на паузу последним
 
 
 def _norm(text: str) -> str:
@@ -107,8 +106,8 @@ def _norm(text: str) -> str:
 
 
 def _window_titles(browsers_only: bool = False) -> list[str]:
-    """Заголовки видимых окон: по ним видно сайт («… - YouTube — Mozilla Firefox»).
-    browsers_only — только окна браузеров (окно приложения «Яндекс Музыка» — не вкладка браузера)."""
+    """Заголовки видимых окон - по ним видно сайт ("... - YouTube - Mozilla Firefox").
+    browsers_only: только браузеры (у Яндекс Музыки своё окно, это не вкладка)."""
     titles: list[str] = []
     buf = ctypes.create_unicode_buffer(512)
     browser_pids = ({p.pid for p in psutil.process_iter(["name"]) if (p.info["name"] or "").lower() in BROWSER_EXES}
@@ -150,7 +149,6 @@ _kind_memory: dict[tuple[str, str], set[str]] = {}   # что уже удало�
 
 
 def _site_kinds(title: str) -> set[str]:
-    """На какой сайт указывает заголовок окна."""
     kinds: set[str] = set()
     if "youtube music" in title:
         kinds |= {"youtube", "music"}
@@ -162,10 +160,9 @@ def _site_kinds(title: str) -> set[str]:
 
 
 def _session_kinds(info: dict, titles: list[str]) -> set[str]:
-    """Что это за плеер: music / youtube / video (может быть несколько сразу).
-    Firefox отдаёт Windows ОДИН плеер на весь браузер — последнюю вкладку со звуком, а заголовок
-    окна показывает только активную вкладку. Поэтому, если трека нет ни в одном заголовке,
-    смотрим, какие сайты вообще открыты: открыта Яндекс Музыка — это может быть музыка."""
+    """Что это за плеер: music / youtube / video.
+    Firefox отдаёт Windows один плеер на весь браузер, а заголовок показывает только активную
+    вкладку. Поэтому, если трека нет ни в одном заголовке, смотрю, какие сайты вообще открыты."""
     app, title = info["app"].lower(), _norm(info["title"])
     kinds: set[str] = set()
     if any(a in app for a in MUSIC_APPS) or info["album"]:
@@ -181,7 +178,7 @@ def _session_kinds(info: dict, titles: list[str]) -> set[str]:
         return _kind_memory[key]
     if key in _kind_memory:
         return _kind_memory[key]
-    # Звук из браузера без музыкального сайта — почти всегда YouTube или другое видео
+    # Звук из браузера без музыкального сайта - почти всегда видео
     return set().union(*(_site_kinds(_norm(t)) for t in _window_titles(browsers_only=True))) or {"video", "youtube"}
 
 
@@ -195,15 +192,14 @@ def _is_browser_session(info: dict) -> bool:
 
 
 def _browser_silent() -> bool:
-    """Браузер сейчас не выдаёт звук (по пиковому уровню его аудиосеансов)."""
     peaks = [_session_peak(s) for s in _audio_sessions() if _session_name(s).lower() in BROWSER_EXES]
     return bool(peaks) and max(peaks) < 0.001
 
 
 async def _wait_status(infos: list[dict], wanted: int, timeout: float = 4.0) -> list[dict]:
-    """Ждёт, пока плееры реально сменят состояние. Возвращает тех, кто так и не сменил.
-    Firefox сообщает о паузе с задержкой (на YouTube — бывает дольше 2.5 с), поэтому:
-    статус каждый раз читаем заново, а для браузера паузой считаем и честную тишину ~0.3 с."""
+    """Ждёт, пока плееры сменят состояние, и возвращает тех, кто не сменил.
+    Firefox сообщает о паузе с задержкой (на YouTube бывает больше 2.5 с), поэтому статус
+    каждый раз читаю заново, а для браузера паузой считаю и тишину ~0.3 с."""
     started = time.time()
     manager = await _SMTCManager.request_async()
     pending = list(infos)
@@ -226,7 +222,7 @@ async def _wait_status(infos: list[dict], wanted: int, timeout: float = 4.0) -> 
 
 
 async def _smtc_media(action: str, target: str | None) -> str | None:
-    """Управляет нужным плеером. None — сеансов нет (пусть сработает запасной способ)."""
+    """Управляет нужным плеером. None - сеансов нет, пусть сработает запасной способ."""
     global _paused_by_me
     sessions, current_app = await _smtc_snapshot()
     if not sessions:
@@ -245,7 +241,7 @@ async def _smtc_media(action: str, target: str | None) -> str | None:
     if action == "pause":
         playing = [i for i in sessions if i["status"] == _PLAYING]
         chosen = [i for i in playing if i in matching]
-        if not chosen and target:   # цель не узнана — берём только «неясные» плееры браузера, музыкальное приложение не трогаем
+        if not chosen and target:   # цель не понял - беру только плееры браузера, музыкальное приложение не трогаю
             chosen = [i for i in playing if _is_browser_session(i)] if target != "music" else playing
         elif not chosen:
             chosen = playing
@@ -256,9 +252,9 @@ async def _smtc_media(action: str, target: str | None) -> str | None:
         failed = await _wait_status(chosen, _PAUSED)
         if (len(failed) == 1 and failed[0]["app"] == current_app and _is_browser_session(failed[0])
                 and not _browser_silent()):
-            # Firefox иногда не принимает паузу от Windows, а медиа-клавишу слушается. Она уходит
-            # текущему плееру — это он и есть, и он всё ещё звучит, так что клавиша именно поставит паузу
-            log("Медиа", "браузер не принял паузу — нажимаю медиа-клавишу")
+            # Firefox иногда игнорирует паузу от Windows, но слушается медиа-клавишу. Клавиша уходит
+            # текущему плееру, а это он и есть, так что она точно поставит паузу
+            log("Медиа", "браузер не принял паузу - нажимаю медиа-клавишу")
             press_key(VK_MEDIA_PLAY_PAUSE)
             failed = await _wait_status(failed, _PAUSED, timeout=2.0)
         done = [i for i in chosen if i not in failed]
@@ -283,7 +279,7 @@ async def _smtc_media(action: str, target: str | None) -> str | None:
             return f"{FAIL}не получилось включить {_label(info)}"
         return f"включил{END} {_label(info)}"
 
-    # next / previous — у того, что играет (или у текущего плеера)
+    # next / previous - тому, что играет
     playing = [i for i in matching if i["status"] == _PLAYING]
     info = (playing or [i for i in matching if is_current(i)] or matching or [None])[0]
     if info is None:
@@ -314,14 +310,13 @@ async def _now_playing() -> str:
 
 
 def now_playing() -> str:
-    """«Что играет?» — название и исполнитель (или канал на YouTube)."""
     if not HAS_SMTC:
         return f"{FAIL}не вижу плееры, не установлен пакет winrt"
     return _smtc_run(_now_playing())
 
 
 def _media_keys(action: str) -> str:
-    """Запасной способ: системные медиа-клавиши (без проверки, какой плеер их получит)."""
+    """Запасной способ: медиа-клавиши (не знаю, какой плеер их получит)."""
     if action == "next":
         press_key(VK_MEDIA_NEXT)
         return f"переключил{END} на следующий трек"
@@ -342,17 +337,15 @@ def _media_keys(action: str) -> str:
 
 
 def _autoplay_when_ready(target: str, timeout: float = 25.0) -> None:
-    """После открытия плеера включаем музыку. Если он уже виден Windows (SMTC) — нажимаем «играть» там.
-    Яндекс Музыка не видна, пока в ней ни разу не играли, — тогда жмём кнопку «Воспроизведение»
-    прямо в её окне (UI Automation): после этого она появляется в Windows, и дальше всё как обычно."""
+    """Включает музыку после открытия плеера. Яндекс Музыку Windows не видит, пока в ней
+    ни разу не нажали play, поэтому жму кнопку в окне через UI Automation."""
     exes = _target_exes(MEDIA_FALLBACK_APP.get(target, "")) if psutil else set()
 
     def sounding() -> bool:
-        """Плеер реально играет — его слышно (статусу сразу после запуска верить нельзя)."""
+        """Играет ли плеер на самом деле (статусу сразу после запуска верить нельзя)."""
         return any(_session_peak(s) > 0.001 for s in _audio_sessions() if _session_name(s).lower() in exes)
 
     async def via_smtc() -> bool:
-        """Плеер виден Windows — нажимаем «играть» там. False — не виден."""
         sessions, _ = await _smtc_snapshot()
         titles = _window_titles()
         for info in sessions:
@@ -377,7 +370,7 @@ def _autoplay_when_ready(target: str, timeout: float = 25.0) -> None:
             how = f"кнопку «{pressed}» в окне" if pressed else None
         if how is None:
             continue
-        # Пока приложение загружается, нажатие может ни к чему не привести — проверяем, зазвучало ли
+        # Пока приложение грузится, нажатие может не сработать - проверяю, появился ли звук
         for _ in range(8):
             time.sleep(0.4)
             if sounding():
@@ -387,7 +380,6 @@ def _autoplay_when_ready(target: str, timeout: float = 25.0) -> None:
 
 
 def play_app(name: str) -> str:
-    """«Открой Яндекс Музыку» — открыть приложение (или показать уже открытое) и сразу включить музыку."""
     opened = open_app(name)
     if not opened.startswith(FAIL):
         threading.Thread(target=_autoplay_when_ready, args=("music",), daemon=True).start()
@@ -395,8 +387,7 @@ def play_app(name: str) -> str:
 
 
 def media(action: str, target: str | None = None) -> str:
-    """Пауза / продолжить / следующий / предыдущий — у нужного плеера.
-    target: "music", "youtube", "video" или None (что угодно)."""
+    """Пауза / play / next / prev у нужного плеера. target: music, youtube, video или None."""
     action = (action or "").strip().lower()
     target = (target or "").strip().lower() or None
     if target not in (None, *_TARGET_NAMES):
@@ -407,7 +398,7 @@ def media(action: str, target: str | None = None) -> str:
             result = _smtc_run(_smtc_media(action, target))
         except Exception as e:
             log("Медиа", f"SMTC не сработал, использую медиа-клавиши: {e}")
-    if result == "":                 # «включи музыку», а включать нечего — открываем приложение / сайт из config.py
+    if result == "":                 # играть нечего - открываю приложение или сайт из config.py
         app = MEDIA_FALLBACK_APP.get(target)
         if app:
             opened = open_app(app)
@@ -423,12 +414,10 @@ def media(action: str, target: str | None = None) -> str:
     return result if result is not None else _media_keys(action)
 
 
-# ───────────────────────── ГРОМКОСТЬ ОТДЕЛЬНЫХ ПРИЛОЖЕНИЙ ─────────────────────────
 _VOLUME_LABELS = {"music": "музыки", "youtube": "ютуба", "video": "видео"}
 
 
 def _target_audio_sessions(target: str) -> list:
-    """Источники звука для цели: music / youtube / video или «app:<название>»."""
     sessions = [s for s in _audio_sessions() if _foreign(s)]
     name = lambda s: _session_name(s).lower()
     if target.startswith("app:"):
@@ -441,15 +430,15 @@ def _target_audio_sessions(target: str) -> list:
         if any("music" in _site_kinds(_norm(t)) for t in _window_titles()):   # музыка во вкладке браузера
             return [s for s in sessions if name(s) in BROWSER_EXES]
         return []
-    found = [s for s in sessions if name(s) in BROWSER_EXES]     # YouTube и видео — в браузере
+    found = [s for s in sessions if name(s) in BROWSER_EXES]     # YouTube и видео - в браузере
     if target == "video":
         found += [s for s in sessions if any(a in name(s) for a in VIDEO_APPS)]
     return found
 
 
 def app_volume(target: str, level: int | None = None, delta: int | None = None) -> str:
-    """Громкость одного приложения, не трогая общую: «музыку тише», «ютуб на 30».
-    У браузера громкость общая на все вкладки — так устроен Windows."""
+    """Громкость одного приложения ("музыку тише", "ютуб на 30").
+    У браузера громкость одна на все вкладки, так устроен Windows."""
     target = (target or "").strip().lower()
     if target not in _VOLUME_LABELS and not target.startswith("app:"):
         target = "app:" + target

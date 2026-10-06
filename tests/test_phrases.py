@@ -1,12 +1,11 @@
-"""Фраза → действие. Каждая строка — то, что уже однажды ломалось или легко сломать.
-Новая формулировка в phrases.py? Добавьте её сюда — и запустите:  .venv\\Scripts\\python -m pytest"""
+"""Фраза -> действие. Каждая строка - то, что уже ломалось или легко сломать."""
 
 import pytest
 
 M = "media"
 
 PHRASE_CASES = [
-    # ── медиа с целью ──
+    # медиа с целью
     ("музыка стоп", [(M, {"action": "pause", "target": "music"})]),
     ("музыка, стоп", [(M, {"action": "pause", "target": "music"})]),
     ("ютуб стоп", [(M, {"action": "pause", "target": "youtube"})]),
@@ -28,14 +27,14 @@ PHRASE_CASES = [
     ("что за песня", [("now_playing", {})]),
     ("кто поёт", [("now_playing", {})]),
 
-    # ── то, что НЕ должно стать медиа ──
+    # то, что НЕ должно стать медиа
     ("включи звук", [("mute", {"state": False})]),
     ("выключи звук", [("mute", {"state": True})]),
     ("переключи окно", [("alt_tab", {})]),
     ("выключи компьютер", [("request_power", {"action": "shutdown"})]),
     ("перезагрузись", [("request_power", {"action": "restart"})]),
 
-    # ── громкость: общая и по приложениям ──
+    # громкость
     ("громкость 30", [("set_volume", {"level": 30})]),
     ("тише", [("change_volume", {"delta": -10})]),
     ("громкость 30 и пауза", [("set_volume", {"level": 30}), (M, {"action": "pause", "target": None})]),
@@ -47,7 +46,7 @@ PHRASE_CASES = [
     ("громкость музыки на пятьдесят", [("app_volume", {"target": "music", "level": 50})]),
     ("телеграм на 50", [("app_volume", {"target": "app:телеграм", "level": 50})]),
 
-    # ── сайты, поиск, короткие формы ──
+    # сайты и поиск
     ("ютуб котики", [("open_browser", {"site": "youtube", "query": "котики"})]),
     ("ютуб 30", [("open_browser", {"site": "youtube", "query": "30"})]),
     ("гугл погода в лондоне", [("open_browser", {"site": "google", "query": "погода в лондоне"})]),
@@ -63,7 +62,7 @@ PHRASE_CASES = [
     ("музыка", [(M, {"action": "play", "target": "music"})]),
     ("спим", [("sleep_mode", {})]),
 
-    # ── приложения и окна ──
+    # приложения и окна
     ("телеграм", [("open_app", {"name": "телеграм"})]),
     ("открой яндекс музыку", [("play_app", {"name": "яндекс музыка"})]),
     ("запусти яндекс музыку", [("play_app", {"name": "яндекс музыка"})]),
@@ -80,7 +79,7 @@ PHRASE_CASES = [
     ("сверни все", [("show_desktop", {})]),
     ("загрузки", [("open_folder", {"name": "downloads"})]),
 
-    # ── сон и перезапуск ──
+    # сон и перезапуск
     ("спать", [("sleep_mode", {})]),
     ("засыпай", [("sleep_mode", {})]),
     ("иди спать", [("sleep_mode", {})]),
@@ -89,13 +88,13 @@ PHRASE_CASES = [
     ("перезапустись", [("restart_self", {})]),
     ("рестарт", [("restart_self", {})]),
 
-    # ── время, таймеры, напоминания ──
+    # время, таймеры, напоминания
     ("сколько времени", [("tell_time", {})]),
     ("поставь таймер на 5 минут", [("set_timer", {"seconds": 300})]),
     ("какие напоминания", [("list_reminders", {})]),
     ("отмени все напоминания", [("cancel_reminders", {})]),
 
-    # ── из лога: ошибки слуха и непонятые формулировки ──
+    # из лога: ослышки и непонятые фразы
     ("музыка, столб", [(M, {"action": "pause", "target": "music"})]),
     ("просто открой браузер", [("open_browser", {})]),
     ("открой browser", [("open_browser", {})]),
@@ -118,7 +117,7 @@ PHRASE_CASES = [
     ("пет долларов тенге", [("calculate", {"text": "пять долларов тенге"})]),
     ("видели текст", [("shortcut", {"action": "select_all"})]),
 
-    # ── редактирование ──
+    # редактирование
     ("скопируй", [("shortcut", {"action": "copy"})]),
     ("скопируй всё", [("shortcut", {"action": "copy_all"})]),
     ("вставь", [("shortcut", {"action": "paste"})]),
@@ -130,7 +129,7 @@ PHRASE_CASES = [
     ("нажми энтер", [("shortcut", {"action": "enter"})]),
     ("отправь", [("shortcut", {"action": "enter"})]),
 
-    # ── браузер и окна ──
+    # браузер и окна
     ("новая вкладка", [("shortcut", {"action": "new_tab"})]),
     ("открой новую вкладку", [("shortcut", {"action": "new_tab"})]),
     ("закрой вкладку", [("shortcut", {"action": "close_tab"})]),
@@ -151,7 +150,7 @@ PHRASE_CASES = [
     ("вперед в складку", [("shortcut", {"action": "next_tab"})]),      # так Whisper слышит «вкладку»
     ("назад вкладку", [("shortcut", {"action": "prev_tab"})]),
 
-    # ── система ──
+    # система
     ("загрузка процессора", [("system_status", {})]),
     ("сколько свободно памяти", [("system_status", {})]),
     ("температура видеокарты", [("gpu_status", {})]),
@@ -160,12 +159,12 @@ PHRASE_CASES = [
     ("заглуши микрофон", [("microphone", {"state": False})]),
     ("включи микрофон", [("microphone", {"state": True})]),
 
-    # ── то, что новые команды не должны перехватить ──
+    # то, что новые команды не должны перехватить
     ("перезагрузи", [("request_power", {"action": "restart"})]),
     ("какая погода", [("weather", {})]),
     ("закрой телеграм", [("close_app", {"name": "телеграм"})]),
 
-    # ── из отчёта по логу (раньше уходили в ИИ) ──
+    # из отчёта по логу (раньше уходили в ИИ)
     ("закрой диспетер задачи", [("close_app", {"name": "диспетчер задачи"})]),
     ("закрой, браузер и яндекс музыку", [("close_app", {"name": "браузер"}),
                                          ("close_app", {"name": "яндекс музыку"})]),
@@ -201,7 +200,7 @@ def test_goes_to_llm(run, phrase):
     ("telegram.exe", [("media", {"action": "previous"})]),
 ])
 def test_back_depends_on_window(run, monkeypatch, exe, expected):
-    """«Назад» в браузере — страница назад, в остальных окнах — предыдущий трек."""
+    """«Назад» в браузере - страница назад, в остальных окнах - предыдущий трек."""
     from core import system
     monkeypatch.setattr(system, "foreground_exe", lambda: exe)
     assert run("назад") == expected
@@ -209,7 +208,7 @@ def test_back_depends_on_window(run, monkeypatch, exe, expected):
 
 @pytest.mark.parametrize("phrase", ["теле... ничего не закрывай", "забудь", "ой, не то", "ладно, проехали"])
 def test_cancel_does_nothing(calls, monkeypatch, phrase):
-    """Передумали на полуслове — ничего не выполняем, только звук отмены."""
+    """Передумали на полуслове - ничего не выполняем, только звук отмены."""
     from core import commands
     sounds = []
     monkeypatch.setattr(commands, "play_sound", sounds.append)

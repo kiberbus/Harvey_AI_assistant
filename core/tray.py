@@ -37,7 +37,6 @@ import core.daily as daily
 import core.system as system
 
 
-# ───────────────────────── ЗНАЧОК В ТРЕЕ ─────────────────────────
 _quit_event = threading.Event()        # «Выход» из меню трея
 _tray_icon = None
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -87,7 +86,7 @@ def _tray_image(sleeping: bool, speaking: bool):
 
 
 def open_log_report() -> None:
-    """Отчёт по логу (log_report.py): что ушло в ИИ и что не получилось — открывается в Блокноте."""
+    """Отчёт по логу (log_report.py), открывается в Блокноте."""
     from log_report import build_report
 
     path = BASE_DIR / "отчёт по логу.txt"
@@ -105,7 +104,6 @@ def _open_samples() -> None:
 
 
 def start_tray() -> None:
-    """Значок у часов: состояние, спать / проснуться, заметки, лог, автозапуск, выход."""
     if not TRAY_ENABLED:
         return
     try:
@@ -131,8 +129,8 @@ def start_tray() -> None:
         except Exception as e:
             log("Трей", f"не удалось изменить автозапуск: {e}")
 
-    def mic_on(_icon, _item) -> None:             # «выключи микрофон» голосом не отменить — Харви не слышит
-        system.mic_on_requested.set()             # включит главный цикл: COM из потока трея роняет процесс
+    def mic_on(_icon, _item) -> None:             # «выключи микрофон» голосом не отменить - Харви не слышит
+        system.mic_on_requested.set()             # главный цикл включит сам: COM из потока трея роняет процесс
 
     def quit_app(icon, _item) -> None:
         _quit_event.set()
@@ -157,7 +155,7 @@ def start_tray() -> None:
     global _tray_icon
     icon = _tray_icon = pystray.Icon("harvey", _tray_image(False, False), ASSISTANT_NAME, menu)
 
-    def refresh() -> None:            # цвет значка: зелёный — слушает, синий — говорит, серый — спит
+    def refresh() -> None:            # цвет значка: зелёный - слушает, синий - говорит, серый - спит
         last = None
         while not _quit_event.is_set():
             state = (daily._sleeping, _speaking.is_set())
@@ -176,8 +174,8 @@ def start_tray() -> None:
 
 
 def restart_self() -> str:
-    """Перезапуск помощницы: так подхватываются изменения в harvey.py / config.py / phrases.py.
-    Сначала отпускаем «замок» единственного экземпляра, иначе новый процесс сразу закроется."""
+    """Перезапуск, чтобы подхватить изменения в коде. Сначала отпускаю mutex,
+    иначе новый процесс решит, что он второй, и закроется."""
     def later() -> None:
         time.sleep(0.6)                     # даём прозвучать сигналу «готово»
         log("Система", "Перезапуск...")
@@ -198,7 +196,7 @@ def restart_self() -> str:
 
 
 def _single_instance() -> bool:
-    """Второй экземпляр (например, автозапуск + ручной запуск) сразу выходит."""
+    """Второй экземпляр (автозапуск + ручной запуск) сразу выходит."""
     global _instance_mutex
     _instance_mutex = _kernel32.CreateMutexW(None, False, "Local\\HarveyAssistantSingleInstance")
     return ctypes.get_last_error() != 183       # ERROR_ALREADY_EXISTS

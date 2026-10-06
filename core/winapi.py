@@ -12,7 +12,6 @@ from core.util import (  # noqa: F401
 )
 
 
-# ───────────────────────── WINDOWS: КЛАВИАТУРА ─────────────────────────
 VK_MEDIA_NEXT, VK_MEDIA_PREV, VK_MEDIA_PLAY_PAUSE = 0xB0, 0xB1, 0xB3
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
@@ -72,7 +71,6 @@ def type_text(text: str) -> None:
         time.sleep(0.005)
 
 
-# ───────────────────────── WINDOWS: БУФЕР ОБМЕНА И АКТИВНОЕ ОКНО ─────────────────────────
 CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
 VK_CONTROL, VK_V = 0x11, 0x56
@@ -155,8 +153,7 @@ if _user32:
 
 
 def copy_selection(timeout: float = 0.6) -> str:
-    """Копирует выделенный текст активного окна (Ctrl+C) и возвращает прежний буфер обмена.
-    Ничего не выделено — пустая строка."""
+    """Копирует выделенное (Ctrl+C) и возвращает прежний буфер. Ничего не выделено - пустая строка."""
     previous = _get_clipboard_text()
     seq = _user32.GetClipboardSequenceNumber()
     _user32.keybd_event(VK_CONTROL, 0, 0, 0)
@@ -164,7 +161,7 @@ def copy_selection(timeout: float = 0.6) -> str:
     _user32.keybd_event(VK_C, 0, KEYEVENTF_KEYUP, 0)
     _user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
     deadline = time.time() + timeout
-    while _user32.GetClipboardSequenceNumber() == seq:       # буфер не изменился — копировать нечего
+    while _user32.GetClipboardSequenceNumber() == seq:       # буфер не изменился - копировать нечего
         if time.time() > deadline:
             return ""
         time.sleep(0.02)
@@ -176,7 +173,7 @@ def copy_selection(timeout: float = 0.6) -> str:
 
 
 def select_back(chars: int) -> None:
-    """Выделяет chars символов левее курсора (Shift+←) — так можно заменить только что записанный текст."""
+    """Выделяет chars символов слева от курсора, чтобы заменить только что записанный текст."""
     _user32.keybd_event(VK_SHIFT, 0, 0, 0)
     try:
         for _ in range(chars):
@@ -197,7 +194,7 @@ if _user32:
 
 
 def foreground_rect() -> tuple[int, int, int, int] | None:
-    """Границы активного окна в настоящих пикселях экрана (как их видит снимок Pillow) или None."""
+    """Границы активного окна в реальных пикселях (как их видит Pillow) или None."""
     hwnd = _user32.GetForegroundWindow()
     if not hwnd or _user32.IsIconic(hwnd):
         return None
@@ -221,7 +218,6 @@ def foreground_title() -> str:
     return buf.value or "без названия"
 
 
-# ───────────────────────── WINDOWS: ОКНА ─────────────────────────
 GW_OWNER, GWL_EXSTYLE, WS_EX_TOOLWINDOW = 4, -20, 0x00000080
 SW_SHOW, SW_RESTORE = 5, 9
 VK_MENU = 0x12
@@ -265,7 +261,7 @@ def _windows_of(pids: set[int]) -> list[tuple[int, bool]]:
             return True
         visible = bool(_user32.IsWindowVisible(hwnd))
         if not visible:
-            # скрытые окна (приложение в трее) берём, только если это настоящее окно, а не служебное
+            # скрытые окна (приложение в трее) беру, только если это настоящее окно
             rect = wintypes.RECT()
             _user32.GetWindowRect(hwnd, ctypes.byref(rect))
             if rect.right - rect.left < 200 or rect.bottom - rect.top < 150:
@@ -278,7 +274,7 @@ def _windows_of(pids: set[int]) -> list[tuple[int, bool]]:
 
 
 def _force_foreground(hwnd: int) -> None:
-    """Windows не любит, когда фоновая программа забирает фокус, поэтому действуем в два приёма."""
+    """Windows не даёт фоновой программе забирать фокус, поэтому делаю это в два шага."""
     fg = _user32.GetForegroundWindow()
     fg_thread = _user32.GetWindowThreadProcessId(fg, None) if fg else 0
     this_thread = _kernel32.GetCurrentThreadId()
@@ -287,7 +283,7 @@ def _force_foreground(hwnd: int) -> None:
     try:
         _user32.BringWindowToTop(hwnd)
         _user32.SetForegroundWindow(hwnd)
-        if _user32.GetForegroundWindow() != hwnd:      # не вышло — «будим» систему нажатием Alt
+        if _user32.GetForegroundWindow() != hwnd:      # не вышло - жму Alt, после этого Windows разрешает сменить фокус
             _user32.keybd_event(VK_MENU, 0, 0, 0)
             _user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
             _user32.SetForegroundWindow(hwnd)
@@ -297,8 +293,8 @@ def _force_foreground(hwnd: int) -> None:
 
 
 def bring_to_front(exes: set[str]) -> str | None:
-    """Если у приложения уже есть окно — разворачивает его и выводит вперёд.
-    Возвращает "restored" (было свёрнуто/скрыто), "shown" (просто показано) или None (окна нет)."""
+    """Если у приложения уже есть окно - разворачивает и выводит вперёд.
+    Возвращает "restored", "shown" или None (окна нет)."""
     if psutil is None or not exes:
         return None
     pids = {p.pid for p in _find_procs(exes, set())}

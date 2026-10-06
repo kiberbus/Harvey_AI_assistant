@@ -1,7 +1,7 @@
-"""Нажатие кнопок в окнах приложений через UI Automation (специальные возможности Windows).
+"""Нажатие кнопок в окнах через UI Automation.
 
-Нужно для Яндекс Музыки: пока в ней ни разу не нажали «играть», она не сообщает Windows о плеере,
-и ни медиа-клавиши, ни SMTC ею не управляют. Кнопку «Воспроизведение» в её окне нажать можно всегда."""
+Нужно для Яндекс Музыки: пока в ней ни разу не нажали play, Windows не видит её как плеер,
+и ни медиа-клавиши, ни SMTC на неё не действуют. А кнопку в окне нажать можно всегда."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def _press(exes: set[str], names: tuple[str, ...], timeout: float) -> str | None
     condition = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, UIA_ButtonControlTypeId)
     deadline = time.time() + timeout
     while True:
-        # Окна на Chromium/Electron включают доступность после первого запроса — первые разы кнопок нет
+        # Chromium/Electron включают доступность только после первого запроса, первые разы кнопок нет
         found = root.FindAll(TreeScope_Descendants, condition)
         buttons = {}
         for i in range(found.Length):
@@ -48,9 +48,8 @@ def _press(exes: set[str], names: tuple[str, ...], timeout: float) -> str | None
 
 
 def press_button(exes: set[str], names: tuple[str, ...], timeout: float = 3.0) -> str | None:
-    """Нажимает первую найденную кнопку из names (по порядку) в окне процесса exes.
-    Возвращает имя нажатой кнопки или None. Можно вызывать из любого потока: COM запускается
-    и закрывается здесь же, а все его объекты освобождаются раньше (иначе — падение в _ctypes)."""
+    """Нажимает первую найденную кнопку из names в окне процесса exes, возвращает её имя или None.
+    COM открывается и закрывается здесь же, а объекты освобождаются раньше - иначе падение в _ctypes."""
     import comtypes
 
     comtypes.CoInitialize()
@@ -60,7 +59,7 @@ def press_button(exes: set[str], names: tuple[str, ...], timeout: float = 3.0) -
         log("Кнопки", f"UI Automation не сработал: {e}")
         return None
     finally:
-        gc.collect()                          # объекты из _press уже не нужны — освобождаем до выхода из COM
+        gc.collect()                          # объекты из _press уже не нужны - освобождаем до выхода из COM
         try:
             comtypes.CoUninitialize()
         except Exception:

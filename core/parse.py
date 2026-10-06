@@ -1,5 +1,5 @@
-"""Быстрый путь: разбор фраз правилами из phrases.py, без ИИ.
-Каждая функция возвращает действие (lambda, которое вызовет tools.execute_tool) или None."""
+"""Быстрый путь без ИИ: разбор фраз по правилам из phrases.py.
+Каждая функция возвращает действие (lambda с tools.execute_tool) или None."""
 
 from __future__ import annotations
 
@@ -83,8 +83,7 @@ def _currency_codes(seg: str) -> list[str]:
 
 
 def parse_local(segment: str) -> Callable[[], str] | None:
-    """Пытается разобрать одну простую команду. Возвращает действие или None (тогда нужен ИИ).
-    Все варианты формулировок лежат в phrases.py."""
+    """Разбирает одну простую команду. None - нужен ИИ."""
     seg = segment.strip(PUNCT)
     if not seg:
         return None
@@ -93,31 +92,31 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if R["self_restart"].search(seg):
         return lambda: tools.execute_tool("restart_self", {})
 
-    # «Открой» без названия — переспрашиваем (ответ можно дать без «Харви», в окне диалога).
-    # Голые «включи» / «запусти» сюда не доходят: это «продолжи воспроизведение» (parse_media)
+    # "Открой" без названия - переспрашиваю, ответить можно без имени
+    # Голые "включи"/"запусти" сюда не доходят, это play в parse_media
     if seg == "открой":
         return lambda: f"{RAW}Что открыть?"
 
-    # Питание компьютера — всегда с подтверждением
+    # Питание - всегда с подтверждением
     if R["cancel_power"].search(seg):
         return lambda: tools.execute_tool("cancel_power", {})
     for key, action in (("shutdown", "shutdown"), ("restart", "restart"), ("pc_sleep", "sleep")):
         if R[key].search(seg):
             return lambda a=action: tools.execute_tool("request_power", {"action": a})
 
-    # Режим сна самой помощницы
+    # Сон самой Харви
     if R["sleep_mode"].search(seg):
         return lambda: tools.execute_tool("sleep_mode", {})
 
-    # Клавиши: копировать, вставить, вкладки, окно влево (раньше «закрой X», медиа и «открой X»)
+    # Клавиши. Должны идти раньше "закрой X", медиа и "открой X"
     for action, rx in SHORTCUT_RES:
         if rx.search(seg):
             return lambda a=action: tools.execute_tool("shortcut", {"action": a})
-    if BACK_OR_PREVIOUS_RE.match(seg):          # «назад»: в браузере — страница, иначе — трек
+    if BACK_OR_PREVIOUS_RE.match(seg):          # "назад": в браузере страница, иначе трек
         return lambda: (tools.execute_tool("shortcut", {"action": "back"}) if system.foreground_exe() in BROWSER_EXES
                         else tools.execute_tool("media", {"action": "previous"}))
 
-    # Микрофон (раньше «заглуши» — это общий звук), состояние компьютера (раньше погоды)
+    # Микрофон раньше "заглуши" (это общий звук), состояние ПК раньше погоды
     if R["mic_off"].search(seg):
         return lambda: tools.execute_tool("microphone", {"state": False})
     if R["mic_on"].search(seg):
@@ -132,11 +131,10 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if m and m.group("letter") in DRIVE_LETTERS:
         return lambda letter=DRIVE_LETTERS[m.group("letter")]: tools.execute_tool("open_drive", {"letter": letter})
 
-    # Закрыть активное окно/приложение (раньше обычного «закрой X»)
+    # Закрыть активное окно - раньше обычного "закрой X"
     if ACTIVE_CLOSE_RE.match(seg):
         return lambda: tools.execute_tool("close_active", {"window_only": "окно" in seg})
 
-    # Таймеры
     if R["timer_cancel"].search(seg):
         return lambda: tools.execute_tool("cancel_timers", {})
     if R["timer_set"].search(seg):
@@ -144,13 +142,11 @@ def parse_local(segment: str) -> Callable[[], str] | None:
         if secs:
             return lambda: tools.execute_tool("set_timer", {"seconds": secs})
 
-    # Время, дата, день недели
     for key, tool in (("datefull", "tell_datefull"), ("weekday", "tell_weekday"),
                       ("date", "tell_date"), ("time", "tell_time")):
         if R[key].search(seg):
             return lambda t=tool: tools.execute_tool(t, {})
 
-    # Заметки, погода, курс валют
     if R["notes_open"].search(seg):
         return lambda: tools.execute_tool("open_notes", {})
     if R["notes_read"].search(seg):
@@ -161,7 +157,6 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if codes:
         return lambda: tools.execute_tool("currency_rate", {"codes": codes})
 
-    # Окна и система
     if R["show_desktop"].search(seg):
         return lambda: tools.execute_tool("show_desktop", {})
     if R["minimize"].search(seg):
@@ -175,7 +170,7 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if R["lock"].search(seg):
         return lambda: tools.execute_tool("lock_pc", {})
 
-    # Свернуть / развернуть конкретное приложение: «сверни яндекс музыку», «разверни телеграм»
+    # Свернуть / развернуть приложение
     m = re.match(r"(?:сверни|свернуть|спрячь)\s+(?:приложение\s+|программу\s+|окно\s+)?(.+)$", seg)
     if m:
         target = m.group(1).strip()
@@ -183,18 +178,16 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     m = re.match(r"(?:разверни|развернуть)\s+(?:приложение\s+|программу\s+|окно\s+)?(.+)$", seg)
     if m and (m.group(1).strip() in APP_ALIASES or find_app(m.group(1).strip())):
         target = m.group(1).strip()
-        return lambda: tools.execute_tool("open_app", {"name": target})      # уже запущено — развернёт окно
+        return lambda: tools.execute_tool("open_app", {"name": target})      # уже запущено - развернёт окно
 
-    # «клауд на весь экран», «разверни телеграм на весь экран»
     m = re.fullmatch(r"(?:(?:разверни|открой|сделай)\s+)?(.+?)\s+(?:на весь экран|на полный экран|во весь экран)", seg)
     if m and (m.group(1) in APP_ALIASES or find_app(m.group(1))):
         return lambda t=m.group(1): _open_maximized(t)
 
-    # «открой музыку» — приложение для музыки (папка — «открой папку музыка»)
+    # "открой музыку" - приложение (папка - "открой папку музыка")
     if re.fullmatch(r"(?:открой|запусти)\s+(?:музыку|музыка|музыкальное приложение)", seg):
         return lambda: tools.execute_tool("play_app", {"name": MEDIA_FALLBACK_APP["music"]})
 
-    # Закрыть приложение
     m = re.match(r"(?:закрой|закрыть|заверши|завершить)\s+(?:приложение\s+|программу\s+)?(.+)$", seg)
     if m:
         target = m.group(1).strip()
@@ -203,22 +196,18 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if R["now_playing"].search(seg):
         return lambda: tools.execute_tool("now_playing", {})
 
-    # Громкость отдельного приложения: «музыку тише», «ютуб на 30»
     volume_action = parse_app_volume(seg)
     if volume_action:
         return volume_action
 
-    # Медиа с целью: «музыка стоп», «ютуб пауза», «включи видео», «следующий трек»
     media_action = parse_media(seg)
     if media_action:
         return media_action
 
-    # Поиск на YouTube / в Google
     search = parse_search(seg)
     if search:
         return search
 
-    # Звук
     if R["mute"].search(seg):
         return lambda: tools.execute_tool("mute", {"state": True})
     if R["unmute"].search(seg):
@@ -233,7 +222,6 @@ def parse_local(segment: str) -> Callable[[], str] | None:
         if R["volume_max"].search(seg):
             return lambda: tools.execute_tool("set_volume", {"level": 100})
 
-    # Яркость
     if R["bright_up"].search(seg):
         return lambda: tools.execute_tool("change_brightness", {"delta": num or BRIGHTNESS_STEP})
     if R["bright_down"].search(seg):
@@ -246,7 +234,7 @@ def parse_local(segment: str) -> Callable[[], str] | None:
         if R["bright_min"].search(seg):
             return lambda: tools.execute_tool("set_brightness", {"level": 10})
 
-    # Медиа (порядок важен: «сними с паузы» не должно срабатывать как «пауза»)
+    # Медиа. Порядок важен: "сними с паузы" не должно стать паузой
     if R["media_next"].search(seg):
         return lambda: tools.execute_tool("media", {"action": "next"})
     if R["media_prev"].search(seg):
@@ -256,11 +244,10 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if R["media_pause"].search(seg):
         return lambda: tools.execute_tool("media", {"action": "pause"})
 
-    # Пустой браузер
     if re.fullmatch(rf"(?:{OPEN_VERBS}\s+(?:мне\s+)?)?(?:браузер|browser|в браузере)", seg):
         return lambda: tools.execute_tool("open_browser", {})
 
-    # Короткие формы без глагола: «музыка», «ютуб», «яндекс музыка», «телеграм»
+    # Короткие формы без глагола: "ютуб", "телеграм"
     if re.fullmatch(r"музык[аиу]|музычку|песню|песенку", seg):
         return lambda: tools.execute_tool("media", {"action": "play", "target": "music"})
     for site, pattern in SITE_PATTERNS:
@@ -271,14 +258,12 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if seg in BARE_FOLDERS:
         return lambda: tools.execute_tool("open_folder", {"name": FOLDER_ALIASES[seg]})
 
-    # Сайты: «открой ютуб», «включи яндекс музыку»
     m = re.match(rf"{OPEN_VERBS}\s+(?:сайт\s+)?(.+)$", seg)
     if m and len(m.group(1).split()) <= 3:
         site = detect_site(m.group(1))
         if site:
             return lambda: tools.execute_tool("open_browser", {"site": site})
 
-    # Папки: «открой загрузки», «открой папку музыка»
     m = re.match(r"(?:открой|покажи|запусти)\s+(папку\s+)?(.+)$", seg)
     if m:
         alias = m.group(2).strip()
@@ -286,7 +271,7 @@ def parse_local(segment: str) -> Callable[[], str] | None:
         if folder and (m.group(1) or alias in BARE_FOLDERS):
             return lambda: tools.execute_tool("open_folder", {"name": folder})
 
-    # Открыть приложение: «открой телеграм», «включи Claude» (музыку, звук, видео «включи» разобрало раньше)
+    # Открыть приложение. Музыку, звук и видео "включи" уже разобрало выше
     m = re.match(r"(?:открой|запусти|открыть|запустить|включи|вруби)\s+(.+)", seg)
     if m and (m.group(1).strip() in APP_ALIASES or not any(marker in seg for marker in COMPLEX_MARKERS)):
         target = m.group(1).strip()
@@ -297,7 +282,7 @@ def parse_local(segment: str) -> Callable[[], str] | None:
 
 
 def _open_maximized(name: str) -> str:
-    """Показать приложение и развернуть его окно. Только что запущенное — не трогаем: окна ещё нет."""
+    """Показывает и разворачивает окно. Только что запущенное не трогаю - окна ещё нет."""
     result = tools.execute_tool("open_app", {"name": name})
     if result.startswith(("развернул", "показал")):
         time.sleep(0.3)
@@ -309,7 +294,7 @@ _NUMBER_WORD_RE = re.compile(r"\b(?:" + "|".join(sorted({*_UNITS, *_TENS, "ст�
 
 
 def _volume_target(seg: str) -> tuple[str | None, str]:
-    """Чью громкость менять: music / youtube / video / «app:<название>» и остаток фразы."""
+    """Чью громкость менять (music / youtube / video / app:имя) и остаток фразы."""
     for name, rx in MEDIA_TARGET_RES:
         if rx.search(seg):
             return name, rx.sub(" ", seg)
@@ -321,20 +306,20 @@ def _volume_target(seg: str) -> tuple[str | None, str]:
 
 
 def parse_app_volume(seg: str) -> Callable[[], str] | None:
-    """«музыку тише», «ютуб на 30», «громкость телеграма 50», «сделай видео погромче на 20»."""
+    """"музыку тише", "ютуб на 30", "громкость телеграма 50"."""
     seg = seg.strip(PUNCT)
     target, rest = _volume_target(seg)
     if target is None:
         return None
     up, down = APP_VOLUME_UP_RE.search(rest), APP_VOLUME_DOWN_RE.search(rest)
     num = parse_number(rest)
-    explicit = re.search(r"громкост|\bзвук|\bна\s+\S|процент|%", rest)   # «ютуб 30» без «на» — это поиск
+    explicit = re.search(r"громкост|\bзвук|\bна\s+\S|процент|%", rest)   # "ютуб 30" без "на" - это поиск
     if up and down or not (up or down or (num is not None and explicit)):
         return None
     leftover = APP_VOLUME_FILLER_RE.sub(" ", _NUMBER_WORD_RE.sub(" ", re.sub(r"\d+", " ", rest)))
     leftover = APP_VOLUME_DOWN_RE.sub(" ", APP_VOLUME_UP_RE.sub(" ", leftover))
     if leftover.strip(PUNCT + " "):
-        return None                       # лишние слова — пусть разбирается кто-то другой
+        return None                       # лишние слова - не это правило
     if up or down:
         delta = (num or VOLUME_STEP) * (1 if up else -1)
         return lambda: tools.execute_tool("app_volume", {"target": target, "delta": delta})
@@ -342,7 +327,7 @@ def parse_app_volume(seg: str) -> Callable[[], str] | None:
 
 
 def _numbers_to_digits(text: str) -> str:
-    """«шесть вечера» → «6 вечера», «восемнадцать тридцать» → «18 30», «двадцать пять» → «25»."""
+    """Числа словами для времени: "шесть вечера" -> "6 вечера"."""
     words = text.split()
     out: list[str] = []
     i = 0
@@ -372,8 +357,7 @@ _REMIND_DAY_RE = re.compile(r"\b(сегодня|завтра|послезавт�
 
 
 def parse_reminder(low: str) -> Callable[[], str] | None:
-    """«напомни в 18:00 позвонить маме», «напомни завтра в 9 утра про встречу»,
-    «напомни через 20 минут выключить плиту», «разбуди в 7»."""
+    """"напомни в 18:00 позвонить маме", "напомни через 20 минут выключить плиту"."""
     if REMIND_CANCEL_RE.search(low):
         return lambda: tools.execute_tool("cancel_reminders", {})
     if REMIND_LIST_RE.search(low):
@@ -408,7 +392,7 @@ def parse_reminder(low: str) -> Callable[[], str] | None:
                     hour = 0
             if hour <= 23 and minute <= 59:
                 moment = now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=shift or 0)
-                if shift is None and moment <= now:           # «в 9», а уже 10 — значит, завтра
+                if shift is None and moment <= now:           # "в 9", а уже 10 - значит завтра
                     moment += timedelta(days=1)
                 at = moment.timestamp()
     if at is None:
@@ -425,14 +409,13 @@ def parse_reminder(low: str) -> Callable[[], str] | None:
 
 
 def parse_media(seg: str) -> Callable[[], str] | None:
-    """Фраза только из глагола, цели и связок: «музыка на стоп», «поставь ютуб на паузу»,
-    «включи видео», «следующий трек». Цель — music / youtube / video (или никакой)."""
+    """Фраза только из глагола, цели и связок: "поставь ютуб на паузу", "следующий трек"."""
     seg = seg.strip(PUNCT)
     if MEDIA_UNPAUSE_RE.search(seg):
         action, rest = "play", MEDIA_UNPAUSE_RE.sub(" ", seg)
     else:
         found = [(name, rx) for name, rx in MEDIA_VERB_RES if rx.search(seg)]
-        if len(found) != 1:                 # нет глагола или их два («выключи и включи») — не наш случай
+        if len(found) != 1:                 # нет глагола или их два ("выключи и включи")
             return None
         action, rx = found[0]
         rest = rx.sub(" ", seg)
@@ -442,7 +425,7 @@ def parse_media(seg: str) -> Callable[[], str] | None:
             target = target or name
             rest = rx.sub(" ", rest)
     if MEDIA_FILLER_RE.sub(" ", rest).strip(PUNCT + " "):
-        return None                         # остались другие слова: «включи звук», «переключи окно»
+        return None                         # есть другие слова: "включи звук", "переключи окно"
     return lambda: tools.execute_tool("media", {"action": action, "target": target})
 
 
@@ -459,7 +442,6 @@ BROWSER_SITE_RE = re.compile(
 
 
 def exact_site(text: str) -> str | None:
-    """Текст целиком — название сайта: «переводчик», «google collab»."""
     text = text.strip(PUNCT)
     for site, pattern in SITE_PATTERNS:
         if pattern.fullmatch(text):
@@ -468,8 +450,7 @@ def exact_site(text: str) -> str | None:
 
 
 def parse_search(low: str) -> Callable[[], str] | None:
-    """«найди котиков на ютубе», «открой ютуб и напиши в поиске котики», «загугли ...»,
-    короткие формы: «ютуб котики», «гугл погода в лондоне», «найди рецепт борща»."""
+    """Поиск: "найди котиков на ютубе", "ютуб котики", "загугли ..."."""
     m = BROWSER_SITE_RE.fullmatch(low)           # «браузер, переводчик», «открой в браузере google collab»
     if m:
         named = exact_site(m.group("rest") or m.group("rest2"))
@@ -477,13 +458,13 @@ def parse_search(low: str) -> Callable[[], str] | None:
             return lambda: tools.execute_tool("open_browser", {"site": named})
     site = detect_site(low)
     if site not in ("youtube", "google"):
-        m = IN_BROWSER_RE.match(low)                  # «открой в браузере астана хаб хакатон» — ищем в Google
+        m = IN_BROWSER_RE.match(low)                  # «открой в браузере астана хаб хакатон» - ищем в Google
         if m:
             query = (m.group("q1") or m.group("q2") or "").strip(PUNCT)
             if query and query not in ("открой", "найди", "поищи"):
                 return lambda: tools.execute_tool("open_browser", {"site": "google", "query": query})
     if site is None:
-        m = BARE_SEARCH_RE.match(low)                 # «найди X» без сайта — ищем в Google
+        m = BARE_SEARCH_RE.match(low)                 # "найди X" без сайта - Google
         if m and m.group("query").strip(PUNCT):
             query = m.group("query").strip(PUNCT)
             return lambda: tools.execute_tool("open_browser", {"site": "google", "query": query})
@@ -492,17 +473,17 @@ def parse_search(low: str) -> Callable[[], str] | None:
         return None
     m = SEARCH_VERB_RE.search(low)
     if not m:
-        short = SHORT_SEARCH_RE.match(low)            # «ютуб котики»
+        short = SHORT_SEARCH_RE.match(low)
         if short:
             query = short.group("query").strip(PUNCT)
             if query and not re.match(rf"{OPEN_VERBS}\b", query) and not SEARCH_VERB_RE.match(query):
                 return lambda: tools.execute_tool("open_browser", {"site": site, "query": query})
-        # «включи на ютубе котики» — глагол без слова «найди» допустим только с предлогом «на/в ютубе»
+        # "включи на ютубе котики" - глагол без "найди" только с "на/в ютубе"
         m = re.search(r"\b(?:включи|запусти)\b", low)
         if not m or not re.search(rf"\b(?:на|в|во)\s+(?:{YT}|{GOOGLE})", low):
             return None
 
-    # Всё, что было ДО глагола поиска, должно быть лишь «открой ютуб и» — иначе там другая команда
+    # До глагола поиска может стоять только "открой ютуб и", иначе это другая команда
     leftover = re.sub(rf"{OPEN_VERBS}|{YT}|{GOOGLE}|\b(?:сайт|и|на|в|во)\b", " ", low[:m.start()])
     if leftover.strip(PUNCT):
         return None
@@ -520,22 +501,21 @@ _HEARING_FIXES = [(re.compile(pattern), replacement) for pattern, replacement in
 
 
 def fix_hearing(low: str) -> str:
-    """Исправляет типичные ошибки Whisper из phrases.HEARING_FIXES: «напомнив 6» → «напомни в 6»."""
+    """Исправляет типичные ослышки Whisper (HEARING_FIXES)."""
     for pattern, replacement in _HEARING_FIXES:
         low = pattern.sub(replacement, low)
     return " ".join(low.split())
 
 
-# Команды, после которых продолжения не бывает: их можно выполнять после короткой паузы
+# После этих команд продолжения не бывает, их можно выполнять после короткой паузы
 _QUICK_KEYS = ("time", "date", "weekday", "datefull", "sleep_mode", "now_playing", "mute", "unmute",
                "media_next", "media_prev", "media_pause", "media_play",
                "volume_up", "volume_down", "bright_up", "bright_down")
 
 
 def is_quick_command(text: str, need_name: bool = True, pending: bool = False) -> bool:
-    """«Харви, пауза», «Харви, громкость 30», «Харви, сколько времени» — законченная короткая команда.
-    Поиск, напоминания, диктовка, открытие приложений и вопросы к ИИ сюда не попадают: у них
-    после паузы часто идёт продолжение («найди рецепт… борща»)."""
+    """Законченная короткая команда ("пауза", "громкость 30").
+    Поиск, напоминания, диктовку и вопросы сюда не беру: после паузы у них часто идёт продолжение."""
     low = text.lower()
     m = WAKE_PATTERN.search(low)
     if m:
@@ -568,19 +548,18 @@ CLOSE_VERBS = ("закрой", "закрыть", "заверши", "заверш
 
 
 def _bare_name(segment: str) -> bool:
-    """Сегмент — просто название без глагола: приложение, сайт, папка, «браузер»."""
     return (segment in APP_ALIASES or segment in FOLDER_ALIASES or exact_site(segment) is not None
             or segment in ("браузер", "browser"))
 
 
 def parse_all(low: str) -> list[Callable[[], str]] | None:
-    """Разбирает всю команду без ИИ. Если хоть одна часть не разобралась — None (всё уйдёт в ИИ)."""
+    """Разбирает всю команду. Если хоть одна часть не разобралась - None, и всё уходит в ИИ."""
     low = fix_hearing(low)
     if BACK_OR_PREVIOUS_RE.match(low) or any(rx.search(low) for _, rx in SHORTCUT_RES):
-        return [parse_local(low)]                       # «назад», «назад в браузере» — до медиа и поиска
-    if MUSIC_APP_RE.fullmatch(low):                     # «запусти яндекс музыку» — открыть и сразу включить
+        return [parse_local(low)]                       # «назад», «назад в браузере» - до медиа и поиска
+    if MUSIC_APP_RE.fullmatch(low):                     # «запусти яндекс музыку» - открыть и сразу включить
         return [lambda: tools.execute_tool("play_app", {"name": MEDIA_FALLBACK_APP["music"]})]
-    # «ютуб стоп» — пауза, «ютуб на 30» — громкость, а не поиск; напоминание не режем по «и»
+    # "ютуб стоп" - пауза, "ютуб на 30" - громкость, а не поиск; напоминание по "и" не режу
     whole = parse_reminder(low) or parse_app_volume(low) or parse_media(low) or parse_search(low)
     if whole:
         return [whole]
@@ -600,7 +579,7 @@ def parse_all(low: str) -> list[Callable[[], str]] | None:
         if pronoun and last_target:
             segment = f"{pronoun.group(1)} {last_target}"
         action = None
-        if last_verb in CLOSE_VERBS and _bare_name(segment):   # «закрой браузер и яндекс музыку» — закрыть обе
+        if last_verb in CLOSE_VERBS and _bare_name(segment):   # «закрой браузер и яндекс музыку» - закрыть обе
             action = parse_local(f"{last_verb} {segment}")
         action = action or parse_local(segment)
         if action is None and last_verb:                # «открой телеграм и браузер» → «открой браузер»

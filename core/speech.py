@@ -1,4 +1,4 @@
-"""Голос Харви: синтез речи (Silero / Piper), сигналы, очередь фраз."""
+"""Голос: синтез речи (Silero / Piper), сигналы, очередь фраз."""
 
 from __future__ import annotations
 
@@ -50,7 +50,6 @@ PREWARM_PHRASES = (
 ) if not QUIET_MODE else ("Произошла ошибка.", "Отключаюсь.")
 
 
-# ───────────────────────── PIPER TTS ─────────────────────────
 _piper_voice: PiperVoice | None = None
 _silero_model = None
 _engine = "piper"            # какой голос реально загружен: "piper" или "silero"
@@ -61,7 +60,7 @@ _tts_cache: dict[str, tuple[np.ndarray, int]] = {}
 TTS_CACHE_MAX = 200
 _inflight = 0                  # фраз/звуков в очереди, в синтезе или в динамиках
 _inflight_lock = threading.Lock()
-_speaking = threading.Event()   # пока set — микрофон «глохнет», чтобы не слушать саму себя
+_speaking = threading.Event()   # пока set - микрофон «глохнет», чтобы не слушать саму себя
 
 
 def _ensure_piper() -> None:
@@ -81,7 +80,7 @@ def _ensure_piper() -> None:
                 log("TTS", f"  -> {fname}...")
                 urllib.request.urlretrieve(f"{base}/{fname}", dest)
 
-    # espeakbridge.pyd ищет данные по захардкоженному пути сборки — копируем туда espeak-ng-data.
+    # espeakbridge.pyd ищет данные по пути, захардкоженному при сборке, - копирую туда espeak-ng-data.
     import shutil
 
     espeak_src = BASE_DIR
@@ -116,8 +115,8 @@ _tts_gen = 0   # растёт при каждом прерывании: уста
 
 
 def _silero_model_file() -> Path:
-    """Модель лежит рядом со скриптом (папка silero). Качаем сами, а не через пакет silero:
-    пути с кириллицей (C:\\Слуга\\...) PyTorch на Windows открыть не может."""
+    """Модель лежит в папке silero. Качаю сам, а не через пакет silero: PyTorch на Windows
+    не открывает пути с кириллицей."""
     path = BASE_DIR / "silero" / f"{SILERO_MODEL}.pt"
     if path.exists() and path.stat().st_size > 10_000_000:
         return path
@@ -148,14 +147,14 @@ def _ensure_silero() -> None:
 
 
 def _ensure_tts() -> None:
-    """Грузит голос из config.TTS_ENGINE; если Silero не взлетел — откатывается на Piper."""
+    """Грузит голос из TTS_ENGINE, если Silero не загрузился - откатываюсь на Piper."""
     global _engine
     if TTS_ENGINE == "silero":
         try:
             _ensure_silero()
             return
         except Exception as e:
-            log("TTS", f"Silero недоступен ({e}) — использую Piper.")
+            log("TTS", f"Silero недоступен ({e}) - использую Piper.")
             if isinstance(e, ModuleNotFoundError) and e.name:
                 log("TTS", f"Не хватает библиотеки, поставьте её: pip install {e.name.split('.')[0]}")
     _ensure_piper()
@@ -173,7 +172,7 @@ def _synthesize_piper(text: str) -> tuple[np.ndarray, int] | None:
         try:
             if SynthesisConfig is None:
                 raise TypeError("SynthesisConfig недоступен")
-            cfg = SynthesisConfig(length_scale=1.0 / TTS_SPEED)      # <1 — быстрее, голос не искажается
+            cfg = SynthesisConfig(length_scale=1.0 / TTS_SPEED)      # <1 - быстрее, голос не искажается
             chunks = [c.audio_float_array for c in _piper_voice.synthesize(text, syn_config=cfg)]
         except TypeError:
             chunks = [c.audio_float_array for c in _piper_voice.synthesize(text)]
@@ -182,7 +181,7 @@ def _synthesize_piper(text: str) -> tuple[np.ndarray, int] | None:
 
 
 def _split_sentences(text: str, limit: int = 300) -> list[str]:
-    """Silero плохо переносит длинные тексты — режем по предложениям."""
+    """Silero плохо переносит длинные тексты, режу по предложениям."""
     chunks: list[str] = []
     current = ""
     for part in re.split(r"(?<=[.!?;])\s+", text):
@@ -235,14 +234,13 @@ SOUND_RATE = 44100
 
 
 def _chime(notes: tuple[float, ...], step_ms: int = 110, decay_ms: int = 260, volume: float = 0.3) -> np.ndarray:
-    """Мягкий «колокольчик»: плавная атака, естественное затухание, тёплые обертоны.
-    Ноты идут с шагом step_ms и звучат внахлёст. По краям — тишина: звуковая карта
-    «съедает» самое начало и конец буфера, из-за этого простой писк казался обрезанным."""
+    """Мягкий колокольчик вместо писка. Ноты идут внахлёст, по краям тишина: звуковая карта
+    съедает начало и конец буфера, и без запаса простой писк звучал обрезанным."""
     rate = SOUND_RATE
-    lead, tail = int(rate * 0.003), int(rate * 0.03)              # поток открыт заранее — запас почти не нужен
+    lead, tail = int(rate * 0.003), int(rate * 0.03)              # поток открыт заранее - запас почти не нужен
     n = int(rate * (decay_ms * 2.2) / 1000)                      # пока затухание почти не уйдёт в ноль
     t = np.arange(n) / rate
-    attack = np.minimum(1.0, t / 0.008)                          # 8 мс — без щелчка, но не «вяло»
+    attack = np.minimum(1.0, t / 0.008)                          # 8 мс - без щелчка, но не «вяло»
     out = np.zeros(lead + int(rate * step_ms / 1000) * (len(notes) - 1) + n + tail, dtype=np.float64)
     for i, f in enumerate(notes):
         tone = (np.sin(2 * np.pi * f * t) * np.exp(-t / (decay_ms / 1000))
@@ -266,24 +264,22 @@ _WAKE_SOUND = _chime((BEEP_FREQ,), decay_ms=BEEP_MS, volume=SOUND_VOLUME)
 
 
 class Chimes:
-    """Отдельный, заранее открытый поток вывода для сигналов. sd.play() каждый раз заново
-    открывает звуковое устройство (на Windows это 0.1–0.3 с) — отсюда была задержка «колокольчика».
-    Поток открываем, как только вы начали говорить, и закрываем после CHIME_IDLE_SEC тишины:
-    постоянно открытый аудиопоток мешал бы компьютеру уходить в сон."""
+    """Отдельный заранее открытый поток для сигналов. sd.play() каждый раз открывает устройство
+    заново (на Windows 0.1-0.3 с) - отсюда была задержка. Открываю поток, когда человек начал
+    говорить, и закрываю после CHIME_IDLE_SEC: постоянно открытый поток не даёт ПК уснуть."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._voices: list[list] = []          # [сэмплы, позиция] — звуки могут накладываться
+        self._voices: list[list] = []          # [сэмплы, позиция] - звуки могут накладываться
         self._stream = None
         self._last_used = 0.0
 
     def warm(self) -> None:
-        """Открыть поток заранее (вызывается при начале речи)."""
         with self._lock:
             self._last_used = time.time()
             if self._stream is not None:
                 return
-            # Сначала WASAPI (~20 мс задержки), если не вышло — системный по умолчанию MME (~90 мс)
+            # Сначала WASAPI (~20 мс), если не вышло - MME по умолчанию (~90 мс)
             for device, extra in ((self._wasapi_device(), sd.WasapiSettings(auto_convert=True)), (None, None)):
                 if device is None and extra is not None:
                     continue
@@ -298,7 +294,6 @@ class Chimes:
 
     @staticmethod
     def _wasapi_device() -> int | None:
-        """Те же колонки, что выбраны в Windows по умолчанию, но через WASAPI."""
         try:
             default = sd.query_devices(kind="output")["name"]
             for i, d in enumerate(sd.query_devices()):
@@ -343,7 +338,7 @@ _chimes = Chimes()
 
 
 def play_beep() -> None:
-    """Короткий сигнал «слушаю» — мгновенно, без ожидания синтеза речи."""
+    """Сигнал "слушаю" - сразу, без синтеза речи."""
     if _chimes.play(_WAKE_SOUND):
         time.sleep(len(_WAKE_SOUND) / SOUND_RATE * 0.6)   # ждём основную часть: дальше выбросим её эхо
         return
@@ -372,7 +367,7 @@ def _enqueue(kind: str, payload: str) -> None:
 
 
 def _item_done(count: int = 1, tail: bool = True) -> None:
-    """Фраза закончилась (или выброшена). Когда очередь пуста — микрофон снова обычной чувствительности."""
+    """Фраза закончилась. Когда очередь пуста, микрофон снова обычной чувствительности."""
     global _inflight
     with _inflight_lock:
         _inflight = max(0, _inflight - count)
@@ -385,7 +380,7 @@ def _item_done(count: int = 1, tail: bool = True) -> None:
 
 
 def _synth_worker() -> None:
-    """Синтезирует фразы заранее: пока звучит одно предложение, следующее уже готовится."""
+    """Синтезирую заранее: пока звучит одно предложение, следующее уже готово."""
     while True:
         kind, payload, gen = _tts_queue.get()
         audio = None
@@ -429,7 +424,6 @@ def _drop_queued(q: queue.Queue) -> int:
 
 
 def stop_speaking() -> None:
-    """Мгновенно обрывает речь и очищает очередь фраз."""
     global _tts_gen
     _tts_gen += 1
     _item_done(_drop_queued(_tts_queue) + _drop_queued(_play_queue), tail=False)
@@ -441,7 +435,7 @@ def stop_speaking() -> None:
 
 
 def speak(text: str) -> None:
-    """Говорит в фоне: управление возвращается сразу, можно давать следующую команду."""
+    """Говорит в фоне, управление возвращается сразу."""
     text = address(text)
     if not text:
         return
@@ -451,14 +445,13 @@ def speak(text: str) -> None:
     _enqueue("text", text)
 
 
-# Граница, по которой отдаём кусок ответа в озвучку: конец предложения или перевод строки
+# Отдаю кусок ответа в озвучку на конце предложения или переводе строки
 _SENTENCE_END_RE = re.compile(r"(?<=[.!?…])\s+|\n+")
 _STREAM_COMMA_AT = 120          # длинное предложение без точки режем по последней запятой
 
 
 def speak_stream(pieces) -> str:
-    """Озвучивает текст, который приходит кусками (ответ ИИ), по предложениям — не дожидаясь конца.
-    Возвращает всё сказанное."""
+    """Озвучивает ответ ИИ по предложениям, пока он ещё генерируется. Возвращает весь текст."""
     spoken: list[str] = []
     buffer = ""
 
@@ -481,11 +474,11 @@ def speak_stream(pieces) -> str:
 
 
 def play_sound(name: str) -> None:
-    """Короткий звук «готово» / «ошибка» / … — через ту же очередь, чтобы не перебивать речь."""
+    """Короткий звук (готово, ошибка) через ту же очередь, чтобы не перебивать речь."""
     sound = SOUNDS.get(name)
     if sound is not None and _chimes.play(sound[0]):
         return                              # мгновенно, через заранее открытый поток
-    _enqueue("sound", name)                 # запасной путь — через общую очередь
+    _enqueue("sound", name)                 # запасной путь - через общую очередь
 
 
 def wait_silence() -> None:
@@ -494,6 +487,6 @@ def wait_silence() -> None:
 
 
 def speak_sync(text: str) -> None:
-    """Говорит и ждёт конца фразы (нужно только для коротких вопросов и прощания)."""
+    """Говорит и ждёт конца (только для коротких вопросов и прощания)."""
     speak(text)
     wait_silence()

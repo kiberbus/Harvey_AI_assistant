@@ -6,7 +6,7 @@ from core import commands, parse, smart
 
 
 def route(text: str):
-    """("ask" | "screen" | "selection:<действие>" | None) — что Харви сделала бы с фразой."""
+    """("ask" | "screen" | "selection:<действие>" | None) - что Харви сделала бы с фразой."""
     action = smart.parse(text)
     if action is None:
         return None
@@ -19,7 +19,7 @@ def route(text: str):
 
 
 @pytest.mark.parametrize("phrase,expected", [
-    # ── вопросы ──
+    # вопросы
     ("что такое квантовая запутанность", "ask"),
     ("кто такой Пушкин", "ask"),
     ("почему небо голубое", "ask"),
@@ -30,9 +30,9 @@ def route(text: str):
     ("как дела", "ask"),
     ("алё", "ask"),
     ("что ты умеешь", "ask"),
-    ("сделаю вежливым", None),                  # без исправления слуха — не наше…
+    ("сделаю вежливым", None),                  # без исправления слуха - не наше…
     ("сделай текст более вежливым", "selection:rewrite"),
-    # ── выделенный текст ──
+    # выделенный текст
     ("объясни выделенное", "selection:explain"),
     ("объясни это", "selection:explain"),
     ("что это значит", "selection:explain"),
@@ -48,7 +48,7 @@ def route(text: str):
     ("перепиши вежливее", "selection:rewrite"),
     ("сделай официальнее", "selection:rewrite"),
     ("сократи выделенное", "selection:rewrite"),
-    # ── экран ──
+    # экран
     ("что тут написано", "screen"),
     ("что это за ошибка", "screen"),
     ("что на экране", "screen"),
@@ -57,7 +57,7 @@ def route(text: str):
     ("что ты видишь", "screen"),
     ("что у меня на экране", "screen"),
     ("посмотри на экран и скажи как исправить", "screen"),
-    # ── не наше ──
+    # не наше
     ("что думаешь о жизни", None),
     ("проверь почту", None),
     ("сделай громче", None),
@@ -67,7 +67,7 @@ def test_route(phrase, expected):
 
 
 def test_commands_win_over_questions():
-    """«Переведи компьютер в спящий режим» — команда, а не перевод: обычные команды проверяются раньше."""
+    """«Переведи компьютер в спящий режим» - команда, а не перевод: обычные команды проверяются раньше."""
     assert parse.parse_all("переведи компьютер в спящий режим") is not None
 
 
@@ -107,7 +107,7 @@ def test_dictation_punctuation(monkeypatch):
 
 
 def test_dictation_keeps_words(monkeypatch):
-    """Модель «улучшила» текст вместо расстановки знаков — пишем как услышали."""
+    """Модель «улучшила» текст вместо расстановки знаков - пишем как услышали."""
     monkeypatch.setattr(smart, "edit", lambda instruction, text: "Здравствуйте, как поживаете?")
     assert smart.prepare_dictation("привет как дела") == "привет как дела"
 
@@ -125,7 +125,7 @@ def test_dictation_style(monkeypatch):
 
 
 def test_dictation_style_after_period(monkeypatch):
-    """Whisper пишет «запиши вежливо. Привет…» — слово «вежливо» не должно попасть в текст."""
+    """Whisper пишет «запиши вежливо. Привет…» - слово «вежливо» не должно попасть в текст."""
     seen = {}
     monkeypatch.setattr(smart, "edit", lambda instruction, text: seen.update(instruction=instruction, text=text)
                         or "Здравствуйте! Как ваши дела?")

@@ -29,16 +29,15 @@ from core.winapi import (  # noqa: F401
     _user32,
 )
 
-# ───────────────────────── КЛАВИШИ ─────────────────────────
 KEYEVENTF_EXTENDEDKEY = 0x0001
 CTRL, SHIFT, ALT, WIN = 0x11, 0x10, 0x12, 0x5B
 TAB, ENTER, ESC, SPACE, BACK, DELETE = 0x09, 0x0D, 0x1B, 0x20, 0x08, 0x2E
 LEFT, UP, RIGHT, DOWN = 0x25, 0x26, 0x27, 0x28
 F5, F11 = 0x74, 0x7A
-# Клавиши «Назад» / «Вперёд» браузера (как на мультимедийной клавиатуре): понимают все браузеры и Проводник,
-# и в отличие от Alt+← не открывают строку меню, если Alt «проскочит» отдельно
+# Клавиши Browser Back / Forward: их понимают все браузеры и Проводник, и в отличие от
+# Alt+Left они не открывают меню, если Alt проскочит отдельно
 BROWSER_BACK, BROWSER_FORWARD = 0xA6, 0xA7
-_EXTENDED = {LEFT, UP, RIGHT, DOWN, DELETE, BROWSER_BACK, BROWSER_FORWARD}   # без флага стрелки — цифровой блок
+_EXTENDED = {LEFT, UP, RIGHT, DOWN, DELETE, BROWSER_BACK, BROWSER_FORWARD}   # без флага стрелки - цифровой блок
 
 
 def _key(letter: str) -> int:
@@ -90,7 +89,7 @@ def _chord(*vks: int) -> None:
 
 
 def shortcut(action: str) -> str:
-    """Нажимает сочетание клавиш в активном окне: копировать, вкладки, окно влево и т.д."""
+    """Нажимает сочетание клавиш в активном окне."""
     entry = SHORTCUT_KEYS.get(action)
     if entry is None:
         return f"{FAIL}не знаю действие «{action}»"
@@ -103,7 +102,6 @@ def shortcut(action: str) -> str:
 
 
 def foreground_exe() -> str:
-    """Имя процесса активного окна («firefox.exe») или пустая строка."""
     if psutil is None:
         return ""
     pid = wintypes.DWORD()
@@ -114,7 +112,6 @@ def foreground_exe() -> str:
         return ""
 
 
-# ───────────────────────── ДИСКИ ─────────────────────────
 def open_drive(letter: str) -> str:
     letter = (letter or "").strip().upper()[:1]
     path = f"{letter}:\\"
@@ -124,7 +121,6 @@ def open_drive(letter: str) -> str:
     return f"открыл{END} диск {letter}"
 
 
-# ───────────────────────── СОСТОЯНИЕ КОМПЬЮТЕРА ─────────────────────────
 def _gb(value: float) -> str:
     return f"{value / 1024 ** 3:.1f}".replace(".", ",")
 
@@ -134,7 +130,6 @@ def _pct(n: int) -> str:
 
 
 def system_status() -> str:
-    """Загрузка процессора и памяти."""
     if psutil is None:
         return f"{FAIL}не могу узнать загрузку: нет psutil"
     cpu = round(psutil.cpu_percent(interval=0.5))
@@ -144,7 +139,7 @@ def system_status() -> str:
 
 
 def gpu_status() -> str:
-    """Температура и загрузка видеокарты NVIDIA (через nvidia-smi)."""
+    """Температура и загрузка NVIDIA через nvidia-smi."""
     try:
         out = subprocess.run(
             ["nvidia-smi", "--query-gpu=temperature.gpu,utilization.gpu,memory.used,memory.total",
@@ -159,7 +154,6 @@ def gpu_status() -> str:
             f"загружена на {_pct(load)}, видеопамять занята на {_pct(used * 100 // max(total, 1))}")
 
 
-# ───────────────────────── МИКРОФОН ─────────────────────────
 def _mic_volume():
     if not HAS_PYCAW:
         raise RuntimeError("pycaw не установлен")
@@ -170,10 +164,10 @@ def _mic_volume():
     return ctypes.cast(iface, ctypes.POINTER(IAudioEndpointVolume))
 
 
-# Состояние микрофона для меню трея. Сам трей к микрофону НЕ обращается: COM из его потока
-# (меню перестраивается при каждой смене «слушает/говорит») ронял весь процесс в _ctypes.
+# Состояние микрофона для меню трея. Сам трей к микрофону не обращается: COM из его
+# потока ронял весь процесс в _ctypes.
 mic_is_muted = False
-mic_on_requested = threading.Event()        # «Включить микрофон» в трее — включает главный цикл
+mic_on_requested = threading.Event()        # «Включить микрофон» в трее - включает главный цикл
 
 
 def mic_muted() -> bool:
@@ -187,8 +181,8 @@ def mic_muted() -> bool:
 
 
 def microphone(state: bool) -> str:
-    """Включает (True) или выключает (False) микрофон по умолчанию — для всех программ сразу.
-    Выключенный микрофон Харви тоже не слышит: включить обратно — из меню значка у часов."""
+    """Включает или выключает микрофон по умолчанию для всех программ.
+    Выключенный микрофон Харви тоже не слышит - включить обратно можно из трея."""
     global mic_is_muted
     _mic_volume().SetMute(0 if state else 1, None)
     mic_is_muted = not state

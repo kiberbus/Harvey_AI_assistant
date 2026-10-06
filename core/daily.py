@@ -39,7 +39,6 @@ from core.speech import (  # noqa: F401
 )
 
 
-# ───────────────────────── ВРЕМЯ, ДАТА, ТАЙМЕРЫ ─────────────────────────
 _WEEKDAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
 _MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня",
            "июля", "августа", "сентября", "октября", "ноября", "декабря")
@@ -94,7 +93,7 @@ def _duration_text(seconds: int) -> str:
 
 
 def parse_duration(text: str) -> int | None:
-    """«5 минут», «пять минут», «2 часа 30 минут», «полчаса» → секунды."""
+    """"5 минут", "2 часа 30 минут", "полчаса" -> секунды."""
     if re.search(r"пол\s?часа", text):
         return 1800
     factor = lambda unit: 1 if unit.startswith("сек") else 60 if unit.startswith("мин") else 3600
@@ -132,7 +131,6 @@ def cancel_timers() -> str:
     return f"отменил{END} таймеры" if active else f"{INFO}активных таймеров нет"
 
 
-# ───────────────────────── РЕЖИМ СНА, ПОДТВЕРЖДЕНИЯ, ПИТАНИЕ ─────────────────────────
 _sleeping = False                  # в режиме сна слушаем только «Харви, проснись»
 _pending: dict | None = None       # ожидающее подтверждения действие: {"action": callable, "deadline": float}
 
@@ -149,7 +147,7 @@ def clear_pending() -> None:
 
 def sleep_mode() -> str:
     set_sleeping(True)
-    return f"{RAW}Хорошо."             # RAW — ровно эта фраза, в любом режиме (будить: «Харви, проснись»)
+    return f"{RAW}Хорошо."             # RAW: говорю ровно эту фразу в любом режиме
 
 
 _POWER_LABELS = {
@@ -170,14 +168,14 @@ def do_power(action: str) -> str:
         return (f"{INFO}перезагружу компьютер через {POWER_DELAY_SEC} секунд, "
                 f"чтобы остановить, скажите: отмени перезагрузку")
     if action == "sleep":
-        # Если в системе включена гибернация, Windows уйдёт именно в неё — это поведение самой системы
+        # Если включена гибернация, Windows уйдёт в неё - это уже поведение системы
         subprocess.Popen(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"], creationflags=flags)
         return f"{INFO}перевожу компьютер в спящий режим"
     return f"{FAIL}неизвестное действие {action}"
 
 
 def request_power(action: str) -> str:
-    """Выключение/перезагрузка/сон — только после «да» (если CONFIRM_DANGEROUS включён)."""
+    """Выключение / перезагрузка / сон - только после подтверждения."""
     global _pending
     if not CONFIRM_DANGEROUS:
         return do_power(action)
@@ -196,7 +194,6 @@ def cancel_power() -> str:
     return f"отменил{END} выключение"
 
 
-# ───────────────────────── ЗАМЕТКИ ─────────────────────────
 def add_note(text: str) -> str:
     NOTES_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(NOTES_FILE, "a", encoding="utf-8") as f:
@@ -221,7 +218,6 @@ def open_notes() -> str:
     return f"открыл{END} заметки"
 
 
-# ───────────────────────── ПОГОДА И КУРС ВАЛЮТ (без ИИ, нужен интернет) ─────────────────────────
 def _http_json(url: str, timeout: float = 6.0) -> dict:
     import urllib.request
 
@@ -284,7 +280,7 @@ _rates_cache: dict = {"ts": 0.0, "rates": {}}
 
 def _rates() -> dict:
     if not _rates_cache["rates"] or time.time() - _rates_cache["ts"] > 3600:
-        # open.er-api.com: бесплатно, без ключа, обновляется раз в сутки (нужна ссылка на exchangerate-api.com)
+        # open.er-api.com: бесплатно и без ключа, курс обновляется раз в сутки
         data = _http_json("https://open.er-api.com/v6/latest/USD")
         _rates_cache.update(ts=time.time(), rates=data["rates"])
     return _rates_cache["rates"]
@@ -306,7 +302,6 @@ def currency_rate(codes: list[str]) -> str:
     return f"{INFO}" + ", ".join(parts) if parts else f"{FAIL}не знаю такую валюту"
 
 
-# ───────────────────────── НАПОМИНАНИЯ ПО ВРЕМЕНИ ─────────────────────────
 _reminders: list[dict] = []        # {"at": unix-время, "text": что напомнить}
 _reminders_lock = threading.Lock()
 
@@ -319,7 +314,7 @@ def _save_reminders() -> None:
 
 
 def _when_words(at: float) -> str:
-    """«сегодня в 18 часов 30 минут» — так, чтобы удобно было произнести."""
+    """Время в удобном для произношения виде: "сегодня в 18 часов 30 минут"."""
     moment, today = datetime.fromtimestamp(at), datetime.now().date()
     days = (moment.date() - today).days
     day = {0: "сегодня", 1: "завтра", 2: "послезавтра"}.get(days, f"{moment.day} {_MONTHS[moment.month - 1]}")
@@ -360,8 +355,7 @@ def _fire_reminder(reminder: dict, missed: bool) -> None:
 
 
 def _reminder_loop() -> None:
-    """Раз в секунду проверяет, не пора ли напомнить. Пропущенные, пока программа была
-    выключена, произносятся при запуске с пометкой «пропущенное»."""
+    """Раз в секунду проверяю напоминания. Пропущенные, пока ПК был выключен, говорю при запуске."""
     while True:
         now = time.time()
         with _reminders_lock:
@@ -389,7 +383,7 @@ def start_reminders() -> None:
 
 
 def _execute(name: str, args: dict) -> str:
-    """tools импортирует этот модуль, поэтому execute_tool подтягиваем при вызове."""
+    """Импорт внутри функции: tools импортирует этот модуль, иначе будет циклический импорт."""
     from core.tools import execute_tool
 
     return execute_tool(name, args)

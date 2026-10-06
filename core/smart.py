@@ -1,7 +1,5 @@
-"""ИИ для текста и экрана: вопросы, выделенный текст, умная запись, «что на экране».
-
-Всё здесь — запросы к модели БЕЗ инструментов: так она не пытается «открыть» что-нибудь
-в ответ на «что такое ютуб» и отвечает быстрее."""
+"""ИИ без инструментов: вопросы, выделенный текст, умная запись, что на экране.
+Без инструментов модель не пытается что-то "открыть" в ответ на "что такое ютуб" и отвечает быстрее."""
 
 from __future__ import annotations
 
@@ -60,7 +58,7 @@ from core.winapi import (  # noqa: F401
     select_back,
 )
 
-# (фраза для ответа в обычном формате — или None, если уже сказано вслух; что запомнить для контекста)
+# (фраза для ответа в обычном формате - или None, если уже сказано вслух; что запомнить для контекста)
 Result = tuple[str | None, str]
 
 ADDRESS_RULE = (f'К пользователю обращайся "{HONORIFIC}".' if USE_HONORIFIC
@@ -86,17 +84,16 @@ SELECTION_THIS_RE = re.compile(SELECTION_THIS)
 SELECTION_ACTION_RES = tuple((name, re.compile(p)) for name, p in SELECTION_ACTIONS.items())
 STYLE_RES = tuple((re.compile(rf"\b(?:{p})"), instruction) for p, instruction in REWRITE_STYLES.items())
 LANG_RES = tuple((re.compile(rf"\b(?:{p})"), lang) for p, lang in TRANSLATE_LANGS.items())
-# Слова, которые остаются от «переведи на английский и вставь», «исправь ошибки», если текста в команде нет
-# («ставь» — так Whisper часто слышит «вставь»)
+# Что остаётся от "переведи на английский и вставь", если своего текста нет
+# ("ставь" - так Whisper слышит "вставь")
 _BARE_FILLER_RE = re.compile(
     r"\b(?:на|в|во|по|мне|пожалуйста|язык\w*|стил\w*|текст\w*|ошибк\w*|орфографи\w*|грамматик\w*|"
     r"пунктуаци\w*|и|а|(?:в|по)?став\w*|замени\w*|его|её|ее|это|кратко|коротко|сюда|туда|сразу)\b")
-# «запиши вежливо: …», «запиши вежливо. …» — стиль в начале диктовки (Whisper ставит после него точку)
+# стиль в начале диктовки; Whisper часто ставит после него точку
 _DICTATE_STYLE_RE = re.compile(rf"^(?:в\s+)?(?:{'|'.join(REWRITE_STYLES)})(?:\s+стил\w*)?[\s,.!:;—–-]+(?P<text>.+)$",
                                re.IGNORECASE | re.DOTALL)
 
 
-# ───────────────────────── РАЗБОР КОМАНДЫ ─────────────────────────
 def _style(low: str) -> str | None:
     for rx, instruction in STYLE_RES:
         if rx.search(low):
@@ -105,7 +102,7 @@ def _style(low: str) -> str | None:
 
 
 def _bare(low: str, verb: re.Pattern) -> bool:
-    """В команде нет своего текста — только глагол, язык, стиль: «переведи на английский», «исправь ошибки»."""
+    """В команде нет своего текста, только глагол, язык или стиль."""
     rest = verb.sub(" ", low)
     for rx, _ in (*LANG_RES, *STYLE_RES):
         rest = rx.sub(" ", rest)
@@ -113,8 +110,8 @@ def _bare(low: str, verb: re.Pattern) -> bool:
 
 
 def parse(low: str) -> Callable[[list[dict]], Result] | None:
-    """Вопрос, работа с выделенным или «что на экране»? Возвращает действие (ему передаётся
-    история диалога) или None. Обычные команды проверяются раньше — сюда приходит остальное."""
+    """Вопрос, выделенное или экран? Возвращает действие или None.
+    Обычные команды проверяются раньше."""
     low = " ".join(low.strip(PUNCT).split())
     if not low:
         return None
@@ -125,7 +122,7 @@ def parse(low: str) -> Callable[[list[dict]], Result] | None:
         if not verb.search(low):
             continue
         if action == "fix" and style:
-            action = "rewrite"                       # «исправь в деловом стиле» — это переписать
+            action = "rewrite"                       # «исправь в деловом стиле» - это переписать
         pointed = SELECTION_WORDS_RE.search(low) or SELECTION_THIS_RE.match(low)
         if pointed or (action == "rewrite" and style) or (action != "rewrite" and _bare(low, verb)):
             return lambda history, a=action: on_selection(a, low, style)
@@ -135,9 +132,8 @@ def parse(low: str) -> Callable[[list[dict]], Result] | None:
     return None
 
 
-# ───────────────────────── ЗАПРОСЫ К МОДЕЛИ ─────────────────────────
 def _ctx_for(text: str) -> int | None:
-    """Длинному тексту нужен контекст больше обычного (модель перезагрузится — это пара секунд)."""
+    """Для длинного текста нужен контекст побольше (модель перезагрузится, это пара секунд)."""
     need = len(text) * 2 // 3 + 500
     if need <= NUM_CTX:
         return None
@@ -156,7 +152,7 @@ _QUOTES = ("«»", '""', "“”", "„“")
 
 
 def clean_output(text: str) -> str:
-    """Убирает то, что модель иногда добавляет вокруг текста: ```, «Вот исправленный текст:», кавычки."""
+    """Модель иногда оборачивает ответ в ``` или пишет "Вот исправленный текст:" - убираю."""
     text = _INTRO_RE.sub("", _FENCE_RE.sub("", text.strip())).strip()
     for left, right in _QUOTES:
         if len(text) > 1 and text[0] == left and text[-1] == right and text.count(left) == 1:
@@ -165,7 +161,6 @@ def clean_output(text: str) -> str:
 
 
 def edit(instruction: str, text: str) -> str:
-    """Переделывает текст по инструкции и возвращает только результат."""
     messages = [{"role": "system", "content": EDIT_PROMPT},
                 {"role": "user", "content": f"{instruction}\n\nТекст:\n{text}"}]
     msg = llm.chat(messages, num_predict=len(text) // 2 + 100, num_ctx=_ctx_for(text)).message
@@ -178,12 +173,10 @@ def _speak_answer(messages: list[dict], num_predict: int = 150, num_ctx: int | N
 
 
 def ask(question: str, history: list[dict]) -> Result:
-    """«Что такое…», «объясни…», «переведи на английский…» — короткий ответ вслух."""
     messages = [{"role": "system", "content": ANSWER_PROMPT}, *history, {"role": "user", "content": question}]
     return _speak_answer(messages)
 
 
-# ───────────────────────── ЧТО НА ЭКРАНЕ ─────────────────────────
 def _screenshot() -> bytes:
     from PIL import ImageGrab
 
@@ -196,7 +189,7 @@ def _screenshot() -> bytes:
 
 
 def ask_screen(question: str) -> Result:
-    """«Что тут написано», «что это за ошибка» — снимок активного окна уходит в модель вместе с вопросом."""
+    """Снимок активного окна уходит в модель вместе с вопросом."""
     image = _screenshot()
     log("Экран", f"снимок {len(image) // 1024} КБ")
     messages = [{"role": "system", "content": SCREEN_PROMPT},
@@ -210,7 +203,6 @@ def ask_screen(question: str) -> Result:
         raise
 
 
-# ───────────────────────── ВЫДЕЛЕННЫЙ ТЕКСТ ─────────────────────────
 def _target_lang(low: str, text: str) -> str:
     for rx, lang in LANG_RES:
         if rx.search(low):
@@ -221,7 +213,7 @@ def _target_lang(low: str, text: str) -> str:
 
 
 def _select_last_dictation() -> str:
-    """Ничего не выделено, но Харви только что записала текст в это же окно — выделяем его."""
+    """Ничего не выделено, но Харви только что записала текст в это окно - выделяю его."""
     if not last_dictation or time.time() - last_dictation["at"] > REWRITE_LAST_SEC:
         return ""
     if last_dictation["hwnd"] != _user32.GetForegroundWindow():
@@ -237,8 +229,7 @@ def _replace_selection(text: str) -> None:
 
 
 def on_selection(action: str, low: str, style: str | None) -> Result:
-    """Ctrl+C → ИИ → ответ вслух (объяснение, пересказ) или новый текст вместо выделенного
-    (перевод, исправление, переписывание — их вслух не читаем)."""
+    """Ctrl+C -> ИИ. Объяснение читаю вслух, перевод и правки вставляю вместо выделенного."""
     if foreground_is_mine():
         return f"{FAIL}сначала переключитесь на окно с текстом", ""
     text = copy_selection().strip()
@@ -246,7 +237,7 @@ def on_selection(action: str, low: str, style: str | None) -> Result:
         text = _select_last_dictation()
     if not text:
         if action in ("explain", "summary") and VISION_ENABLED:
-            return ask_screen(low)                   # «объясни это» без выделения — смотрим на экран
+            return ask_screen(low)                   # «объясни это» без выделения - смотрим на экран
         return f"{FAIL}сначала выделите текст", ""
     if len(text) > SELECTION_MAX_CHARS:
         return f"{FAIL}выделено слишком много текста, больше {SELECTION_MAX_CHARS} символов", ""
@@ -260,7 +251,7 @@ def on_selection(action: str, low: str, style: str | None) -> Result:
                     {"role": "user", "content": f"{instruction}\n\nТекст:\n{text}"}]
         return _speak_answer(messages, num_ctx=num_ctx)
 
-    # translate / fix / rewrite — новый текст встаёт на место выделенного (в тихом режиме — только звук «готово»)
+    # перевод и правки встают на место выделенного
     if action == "translate":
         lang = _target_lang(low, text)
         instruction, done, verb = f"Переведи текст на {lang} язык.", f"перевел{END} текст на {lang}", "перевести"
@@ -279,20 +270,19 @@ def on_selection(action: str, low: str, style: str | None) -> Result:
     return done, ""
 
 
-# ───────────────────────── УМНАЯ ЗАПИСЬ ─────────────────────────
 def _letters(text: str) -> str:
     return re.sub(r"[^\w]", "", text.lower().replace("ё", "е"))
 
 
 def same_words(before: str, after: str) -> bool:
-    """Модель только расставила знаки — или заодно поменяла слова? Сравниваем одни буквы."""
+    """Модель только расставила знаки или поменяла слова? Сравниваю одни буквы."""
     a, b = _letters(before), _letters(after)
     return bool(b) and difflib.SequenceMatcher(None, a, b).ratio() >= 0.9
 
 
 def prepare_dictation(text: str) -> str:
-    """«запиши вежливо …» — переписать в этом стиле; иначе — расставить знаки препинания (SMART_DICTATION).
-    Ошибка или модель поменяла слова — пишем как услышали."""
+    """"запиши вежливо ..." - переписать стилем, иначе только пунктуация.
+    Если модель поменяла слова или упала - пишу как услышал."""
     m = _DICTATE_STYLE_RE.match(text.strip())
     if m:
         instruction, source = f"Перепиши текст {_style(text.lower()) or DEFAULT_STYLE}.", m.group("text")
@@ -308,6 +298,6 @@ def prepare_dictation(text: str) -> str:
     if not result:
         return source
     if not m and not same_words(source, result):
-        log("Запись", f"ИИ поменял слова («{result}») — пишу как услышала")
+        log("Запись", f"ИИ поменял слова («{result}») - пишу как услышала")
         return source
     return result

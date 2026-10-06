@@ -1,4 +1,4 @@
-"""Слух: Whisper, VAD, слово-активатор (openWakeWord), запись фраз с микрофона."""
+"""Слух: Whisper, VAD, слово-активатор, запись фраз с микрофона."""
 
 from __future__ import annotations
 
@@ -58,15 +58,14 @@ MAX_UTTERANCE_BLOCKS = int(MAX_UTTERANCE_SEC * SAMPLE_RATE / BLOCK_SIZE)
 COMMAND_WAIT_BLOCKS = int(COMMAND_TIMEOUT * SAMPLE_RATE / BLOCK_SIZE)
 
 
-# ───────────────────────── WHISPER ─────────────────────────
 _whisper_model = None
 _whisper_lock = threading.Lock()
 _whisper_ready = threading.Event()
 
 
 def _add_nvidia_dll_dirs() -> None:
-    """Подключает cuBLAS/cuDNN из pip-пакетов nvidia-*-cu12: CTranslate2 ищет именно CUDA 12,
-    а системная CUDA 13 (cublas64_13.dll) ему не подходит."""
+    """Подключаю cuBLAS/cuDNN из pip-пакетов nvidia-*-cu12: CTranslate2 нужна CUDA 12,
+    а системная CUDA 13 ему не подходит."""
     try:
         import nvidia  # noqa: F401  (namespace-пакет, ставится вместе с nvidia-cublas-cu12 и др.)
     except ImportError:
@@ -97,13 +96,13 @@ def _create_whisper(size: str, device: str, compute: str):
 
 
 def _load_whisper() -> None:
-    """Грузит Whisper и сразу прогоняет секунду тишины: именно на первом распознавании
-    вылезает «cublas64_12.dll not found», поэтому ошибку ловим здесь и откатываемся на процессор."""
+    """Грузит Whisper и сразу прогоняет секунду тишины: ошибка "cublas64_12.dll not found"
+    вылезает только на первом распознавании, поэтому ловлю её здесь и перехожу на процессор."""
     global _whisper_model
     try:
         _add_nvidia_dll_dirs()
         attempts = [(WHISPER_MODEL_SIZE, WHISPER_DEVICE, WHISPER_COMPUTE)]
-        if WHISPER_DEVICE != "cpu":      # turbo на процессоре медленная — там берём модель поменьше
+        if WHISPER_DEVICE != "cpu":      # turbo на процессоре медленная - там берём модель поменьше
             attempts.append((WHISPER_CPU_MODEL, "cpu", "int8"))
         for size, device, compute in attempts:
             try:
@@ -116,7 +115,7 @@ def _load_whisper() -> None:
                 log("STT", f"Whisper готов ({size}, {device}).")
                 break
             except Exception as e:
-                log("STT", f"{device}: не получилось — {e}")
+                log("STT", f"{device}: не получилось - {e}")
         if VAD_ENABLED:
             has_speech(np.zeros(SAMPLE_RATE, dtype=np.float32))     # прогрев VAD
     except Exception as e:
@@ -129,8 +128,7 @@ _vad_skipped = 0
 
 
 def has_speech(audio: np.ndarray) -> bool:
-    """Silero VAD (идёт вместе с faster-whisper, работает за миллисекунды на процессоре):
-    есть ли во фрагменте речь. Стук, кашель, музыку и шум не отдаём тяжёлому Whisper."""
+    """Silero VAD (идёт с faster-whisper): есть ли в куске речь. Шум и музыку Whisper не отдаю."""
     from faster_whisper.vad import VadOptions, get_speech_timestamps
 
     options = VadOptions(threshold=VAD_THRESHOLD, min_speech_duration_ms=150, speech_pad_ms=100)
@@ -151,10 +149,9 @@ def _save_wav(path: Path, audio: np.ndarray) -> None:
 
 
 def cut_name(audio: np.ndarray) -> np.ndarray | None:
-    """Вырезает имя из фразы «Харви, …» по громкости, без Whisper: имя — первый «островок» звука,
-    после которого идёт пауза. Паузы нет (имя слито с командой) — None: лучше меньше образцов, но чистых.
-    По краям — запас тишины: без него плеер Windows не успевает доиграть конец короткого файла,
-    и кажется, что «-ви» обрезано."""
+    """Вырезает имя из "Харви, ..." по громкости, без Whisper: имя - первый кусок звука перед паузой.
+    Если паузы нет (имя слито с командой) - None, лучше меньше образцов, но чистых.
+    По краям оставляю тишину, иначе плеер Windows не доигрывает конец короткого файла."""
     hop = 160                                                        # 10 мс
     frames = len(audio) // hop
     if frames < 20:
@@ -175,17 +172,17 @@ def cut_name(audio: np.ndarray) -> np.ndarray | None:
     if last is None:
         return None
     voiced = (last - first) * hop / SAMPLE_RATE
-    if not 0.15 <= voiced <= 0.7:                                    # длиннее — скорее «Харви открой» без паузы
+    if not 0.15 <= voiced <= 0.7:                                    # длиннее - скорее «Харви открой» без паузы
         return None
-    start = max(0, (first - 12) * hop)                               # «Х» тихий — 120 мс запаса перед речью
+    start = max(0, (first - 12) * hop)                               # «Х» тихий - 120 мс запаса перед речью
     clip = audio[start:min(len(audio), (last + 6) * hop)].copy()     # и 60 мс после (там уже тишина)
-    pad = np.zeros(int(0.3 * SAMPLE_RATE), dtype=np.float32)          # 0.3 с тишины — чтобы плеер доиграл
+    pad = np.zeros(int(0.3 * SAMPLE_RATE), dtype=np.float32)          # 0.3 с тишины - чтобы плеер доиграл
     return np.concatenate([clip, pad])
 
 
 def collect_name_sample(audio: np.ndarray) -> None:
-    """В фоне вырезает из фразы «Харви, …» само имя и сохраняет в WAKE_SAMPLES_DIR —
-    так копятся ваши настоящие произношения имени для обучения своей модели. Видеокарту не трогает."""
+    """В фоне сохраняет имя из фраз в WAKE_SAMPLES_DIR - так копятся мои настоящие произношения
+    для обучения модели."""
     if not WAKE_COLLECT:
         return
 
@@ -212,7 +209,7 @@ def collect_name_sample(audio: np.ndarray) -> None:
 
 
 def transcribe(audio: np.ndarray) -> str:
-    """float32 16 кГц → текст (с исходным регистром). Без речи (по VAD) — сразу пустая строка."""
+    """float32 16 кГц -> текст. Если VAD не нашёл речь - пустая строка."""
     global _vad_skipped
     if _whisper_model is None:
         return ""
@@ -241,18 +238,17 @@ def transcribe(audio: np.ndarray) -> str:
 
 
 def is_noise(low: str) -> bool:
-    """Отсеивает галлюцинации Whisper на тишине/шуме, включая эхо собственного промпта."""
+    """Отсеивает галлюцинации Whisper на тишине, включая эхо собственного промпта."""
     if len(low) < 3 or any(h in low for h in HALLUCINATIONS):
         return True
     return difflib.SequenceMatcher(None, low, WHISPER_PROMPT.lower()).ratio() > 0.8
 
 
-# ───────────────────────── СЛОВО-АКТИВАТОР (openWakeWord) ─────────────────────────
-_WAKE_OK_FILE = BASE_DIR / ".wake_ok"    # «эту версию модели уже проверяли» — чтобы не проверять при каждом запуске
+_WAKE_OK_FILE = BASE_DIR / ".wake_ok"    # версию модели уже проверял - не проверяю при каждом запуске
 
 
 def _wake_data_file() -> Path | None:
-    """Файл с весами, на который ссылается модель (новый PyTorch кладёт веса рядом: harvey.onnx.data)."""
+    """Файл весов рядом с моделью (новый PyTorch сохраняет их отдельно: harvey.onnx.data)."""
     data = WAKE_MODEL.read_bytes()
     i = data.find(b"location\x12")                 # запись external_data: key="location", value=<имя файла>
     if i < 0:
@@ -262,9 +258,8 @@ def _wake_data_file() -> Path | None:
 
 
 def _check_wake_model() -> str | None:
-    """Проверяет модель имени ДО загрузки. Битая модель роняет onnxruntime вместе со всей программой
-    (это не исключение, его не поймать), поэтому пробная загрузка идёт в отдельном процессе.
-    None — всё хорошо, иначе — понятная причина."""
+    """Проверяю модель имени до загрузки в отдельном процессе: битая модель роняет onnxruntime
+    вместе со всей программой, и это не исключение, его не поймать. None - всё в порядке."""
     data_file = _wake_data_file()
     if data_file is not None and not data_file.exists():
         return (f"у модели {WAKE_MODEL.name} нет файла с весами {data_file.name} — "
@@ -291,14 +286,13 @@ def _check_wake_model() -> str | None:
 
 
 class WakeDetector:
-    """Маленькая нейросеть слушает имя на каждом блоке звука (~2 мс на 0.1 с).
-    Whisper запускается, только если имя прозвучало, — остальное время видеокарта отдыхает,
-    а разговоры рядом и телевизор не распознаются вовсе."""
+    """Маленькая сеть слушает имя на каждом блоке (~2 мс на 0.1 с). Whisper запускается только
+    после имени, а разговоры рядом и телевизор не распознаются вовсе."""
 
     def __init__(self) -> None:
         self._model = None
         self._hit = False
-        self._peak = 0.0             # наибольшая уверенность в имени с прошлой проверки — для подбора порога
+        self._peak = 0.0             # наибольшая уверенность в имени с прошлой проверки - для подбора порога
         self.last_peak = 0.0         # то же для последней фразы (после take)
 
     @property
@@ -307,12 +301,12 @@ class WakeDetector:
 
     def load(self) -> None:
         if not WAKE_MODEL.exists():
-            log("Wake", f"модели {WAKE_MODEL.name} нет — имя ищет Whisper (как раньше). "
-                        f"Как обучить свою — см. папку {WAKE_MODEL.parent.name}")
+            log("Wake", f"модели {WAKE_MODEL.name} нет - имя ищет Whisper (как раньше). "
+                        f"Как обучить свою - см. папку {WAKE_MODEL.parent.name}")
             return
         problem = _check_wake_model()
         if problem:
-            log("Wake", f"{problem} — имя ищет Whisper, как раньше")
+            log("Wake", f"{problem} - имя ищет Whisper, как раньше")
             return
         try:
             from openwakeword.model import Model
@@ -342,7 +336,7 @@ class WakeDetector:
     def take(self) -> bool:
         """Звучало ли имя с прошлой проверки (флаг сбрасывается)."""
         hit, self._hit = self._hit, False
-        if self._peak >= 0.1:              # похоже на имя хоть немного — пишем, чтобы подобрать WAKE_THRESHOLD
+        if self._peak >= 0.1:              # похоже на имя - пишу в лог, чтобы подобрать порог
             log("Wake", f"уверенность в имени {self._peak:.2f} (порог {WAKE_THRESHOLD}) — {'услышала' if hit else 'мимо'}")
         self.last_peak, self._peak = self._peak, 0.0
         return hit
@@ -352,28 +346,24 @@ _wake = WakeDetector()
 
 
 def _get_block(audio_q: queue.Queue, timeout: float | None = None) -> np.ndarray:
-    """Следующий блок с микрофона; заодно отдаём его детектору имени."""
     block = audio_q.get(timeout=timeout).flatten()
     _wake.feed(block)
     return block
 
 
 def _strip_name_like(text: str) -> str:
-    """Имя услышала нейросеть, а Whisper записал его иначе («Гарри, пауза») — убираем первое слово,
-    если оно похоже на имя."""
+    """Имя услышала сеть, а Whisper записал иначе ("Гарри, пауза") - убираю первое слово."""
     words = text.split(maxsplit=1)
     if words and difflib.SequenceMatcher(None, words[0].lower().strip(PUNCT), "харви").ratio() >= 0.5:
         return words[1] if len(words) > 1 else ""
     return text
 
 
-# ───────────────────────── ЗАПИСЬ РЕЧИ ─────────────────────────
 def _rms(block: np.ndarray) -> float:
     return float(np.sqrt(np.mean(block ** 2)))
 
 
 def calibrate_silence(duration: float = 0.5) -> float:
-    """Измеряет фоновый шум и считает порог чувствительности."""
     recording = sd.rec(int(duration * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=1, dtype="float32")
     sd.wait()
     return max(0.005, min(0.02, _rms(recording.flatten()) * 1.8))
@@ -389,9 +379,9 @@ def drain(q: queue.Queue) -> None:
 
 def record_utterance(audio_q: queue.Queue, pre_buffer: deque, first_block: np.ndarray,
                      threshold: float, early_check: Callable[[np.ndarray], bool] | None = None) -> np.ndarray | None:
-    """Пишет фразу от первого громкого блока до паузы; лишнюю тишину в конце обрезает (быстрее STT).
-    early_check: после короткой паузы (EARLY_SILENCE) спрашиваем, не законченная ли это команда —
-    если да, не ждём полную паузу SILENCE_DURATION («пауза», «громкость 30» срабатывают на ~0.5 с раньше)."""
+    """Пишет фразу от первого громкого блока до паузы, лишнюю тишину в конце обрезает.
+    early_check: после короткой паузы проверяю, не законченная ли это команда, и тогда не жду
+    полную паузу ("пауза" срабатывает на ~0.5 с раньше)."""
     chunks = list(pre_buffer) + [first_block]
     silent = checks = 0
     while silent < SILENCE_BLOCKS and len(chunks) < MAX_UTTERANCE_BLOCKS:
@@ -413,7 +403,6 @@ def record_utterance(audio_q: queue.Queue, pre_buffer: deque, first_block: np.nd
 
 
 def record_command(audio_q: queue.Queue, threshold: float) -> np.ndarray | None:
-    """Ждёт команду после одиночного «Харви»."""
     pre: deque = deque(maxlen=3)
     chunks: list[np.ndarray] = []
     started = False

@@ -26,7 +26,6 @@ from core.util import (  # noqa: F401
 )
 
 
-# ───────────────────────── WINDOWS: ГРОМКОСТЬ И ИСТОЧНИКИ ЗВУКА ─────────────────────────
 def _endpoint_volume():
     if not HAS_PYCAW:
         raise RuntimeError("pycaw не установлен")
@@ -62,19 +61,18 @@ def _session_name(session) -> str:
 
 
 def _foreign(session) -> bool:
-    """Источник, которым можно управлять: не мы сами, не системные звуки и не из NO_VOLUME_CONTROL."""
+    """Можно ли управлять источником: не сама Харви, не системные звуки, не NO_VOLUME_CONTROL."""
     if session.ProcessId in (0, OWN_PID):
         return False
     return _session_name(session).lower() not in NO_VOLUME_CONTROL
 
 
 def active_audio_sessions() -> list:
-    """Источники звука, которые сейчас активны (кроме самой помощницы)."""
     return [s for s in _audio_sessions() if _foreign(s) and (s.State == 1 or _session_peak(s) > 0.001)]
 
 
 def audio_is_playing(window: float = 0.25) -> bool:
-    """True, если какое-то приложение реально выдаёт звук (проверяем пиковый уровень)."""
+    """Проверяю по пиковому уровню, реально ли что-то звучит."""
     end = time.time() + window
     while True:
         if any(_foreign(s) and _session_peak(s) > 0.002 for s in _audio_sessions()):
@@ -84,14 +82,14 @@ def audio_is_playing(window: float = 0.25) -> bool:
         time.sleep(0.05)
 
 
-DUCK_STATE_FILE = BASE_DIR / ".duck_state.json"   # на случай, если программу закроют, пока музыка приглушена
+DUCK_STATE_FILE = BASE_DIR / ".duck_state.json"   # если программу закроют, пока музыка приглушена
 
 
 class Ducker:
-    """Приглушает фоновые источники звука на время речи Харви, затем возвращает громкость.
-    Громкость запоминается по ПРИЛОЖЕНИЮ, а не по аудиосеансу: браузеры пересоздают сеансы
-    (например, после паузы), и Windows выдаёт новому сеансу приглушённую громкость — раньше
-    из-за этого музыка иногда так и оставалась тихой."""
+    """Приглушает фоновый звук, пока Харви говорит.
+    Громкость запоминаю по приложению, а не по сеансу: браузеры пересоздают сеансы после паузы,
+    и Windows выдаёт новому сеансу уже приглушённую громкость. Из-за этого у меня музыка
+    иногда так и оставалась тихой."""
 
     def __init__(self) -> None:
         self._saved: dict[str, float] = {}     # имя процесса → исходная громкость
@@ -103,7 +101,7 @@ class Ducker:
 
     @property
     def stale(self) -> bool:
-        """Приглушено слишком долго — возвращаем громкость, что бы ни происходило."""
+        """Страховка: слишком долго приглушено - возвращаю громкость."""
         return bool(self._saved) and time.time() - self._since > DUCK_MAX_SEC
 
     def duck(self) -> None:
@@ -127,7 +125,7 @@ class Ducker:
 
     @staticmethod
     def _volumes_of(names) -> list[tuple[object, str]]:
-        """Все ТЕКУЩИЕ сеансы этих приложений — включая пересозданные после приглушения."""
+        """Все текущие сеансы этих приложений, включая пересозданные."""
         result = []
         for s in _audio_sessions():
             name = _session_name(s).lower()
@@ -154,8 +152,8 @@ class Ducker:
         DUCK_STATE_FILE.unlink(missing_ok=True)
 
     def set_app(self, name: str, session, value: float) -> None:
-        """Новая громкость приложения. Если оно сейчас приглушено — меняем «исходную» громкость,
-        иначе после речи Харви вернула бы старую."""
+        """Если приложение сейчас приглушено, меняю сохранённую громкость, иначе после речи
+        вернётся старая."""
         value = max(0.0, min(1.0, value))
         if name in self._saved:
             self._saved[name] = value
@@ -167,11 +165,10 @@ class Ducker:
         session.SimpleAudioVolume.SetMasterVolume(value, None)
 
     def original(self, name: str, session) -> float:
-        """Громкость приложения без учёта временного приглушения."""
         return self._saved.get(name, session.SimpleAudioVolume.GetMasterVolume())
 
     def recover(self) -> None:
-        """При запуске: если в прошлый раз программа закрылась с приглушённой музыкой — возвращаем."""
+        """Если в прошлый раз программа упала с приглушённой музыкой - возвращаю громкость."""
         try:
             saved = json.loads(DUCK_STATE_FILE.read_text(encoding="utf-8"))
         except Exception:
@@ -188,7 +185,6 @@ class Ducker:
 _ducker = Ducker()
 
 
-# ───────────────────────── ИНСТРУМЕНТЫ: ЗВУК / МЕДИА / ЯРКОСТЬ ─────────────────────────
 def set_volume(level: int) -> str:
     level = _clamp(level)
     ev = _endpoint_volume()
