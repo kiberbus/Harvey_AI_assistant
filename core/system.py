@@ -28,6 +28,7 @@ from core.winapi import (  # noqa: F401
     KEYEVENTF_KEYUP,
     _user32,
 )
+from core import browser
 
 KEYEVENTF_EXTENDEDKEY = 0x0001
 CTRL, SHIFT, ALT, WIN = 0x11, 0x10, 0x12, 0x5B
@@ -70,6 +71,8 @@ SHORTCUT_KEYS: dict[str, tuple[list[tuple[int, ...]], str]] = {
     "reopen_tab": ([(CTRL, SHIFT, _key("t"))], f"вернул{END} закрытую вкладку"),
     "next_tab": ([(CTRL, TAB)], f"переключил{END} на следующую вкладку"),
     "prev_tab": ([(CTRL, SHIFT, TAB)], f"переключил{END} на предыдущую вкладку"),
+    "first_tab": ([(CTRL, _key("1"))], f"переключил{END} на первую вкладку"),
+    "last_tab": ([(CTRL, _key("9"))], f"переключил{END} на последнюю вкладку"),
     "refresh": ([(F5,)], f"обновил{END} страницу"),
     "back": ([(BROWSER_BACK,)], f"{'вернулась' if FEMALE_VOICE else 'вернулся'} назад"),
     "forward": ([(BROWSER_FORWARD,)], f"{'перешла' if FEMALE_VOICE else 'перешёл'} вперёд"),
@@ -89,12 +92,27 @@ def _chord(*vks: int) -> None:
         _user32.keybd_event(vk, 0, (KEYEVENTF_EXTENDEDKEY if vk in _EXTENDED else 0) | KEYEVENTF_KEYUP, 0)
 
 
+# Эти клавиши имеют смысл только в браузере (и в окне проводника - там тоже вкладки и назад/вперёд).
+# Если в фокусе другое окно, сначала вывожу вперёд браузер: иначе Ctrl+W закроет что-то в другой программе
+BROWSER_ACTIONS = {"new_tab", "close_tab", "reopen_tab", "next_tab", "prev_tab", "first_tab", "last_tab",
+                   "back", "forward"}
+TAB_SWITCH_ACTIONS = {"next_tab", "prev_tab", "first_tab", "last_tab"}
+
+
 def shortcut(action: str) -> str:
-    """Нажимает сочетание клавиш в активном окне."""
-    entry = SHORTCUT_KEYS.get(action)
-    if entry is None:
+    """Нажимает сочетание клавиш в активном окне (браузерные - в браузере)."""
+    if action not in SHORTCUT_KEYS:
         return f"{FAIL}не знаю действие «{action}»"
-    chords, done = entry
+    if action in BROWSER_ACTIONS and not browser.foreground_kind() and not browser.focus_browser():
+        return f"{FAIL}браузер не открыт"
+    if action in TAB_SWITCH_ACTIONS:
+        browser.mark_tab_action()
+    return press_chords(action)
+
+
+def press_chords(action: str) -> str:
+    """Само нажатие сочетания, без выбора окна."""
+    chords, done = SHORTCUT_KEYS[action]
     for i, chord in enumerate(chords):
         if i:
             time.sleep(0.05)

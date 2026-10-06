@@ -190,11 +190,35 @@ PHRASE_CASES = [
     # браузер и окна
     ("новая вкладка", [("shortcut", {"action": "new_tab"})]),
     ("открой новую вкладку", [("shortcut", {"action": "new_tab"})]),
-    ("закрой вкладку", [("shortcut", {"action": "close_tab"})]),
+    ("закрой вкладку", [("close_tab", {"which": "current"})]),
+    ("закрой эту вкладку", [("close_tab", {"which": "current"})]),
+    ("закрой вклад", [("close_tab", {"which": "current"})]),                     # из лога
+    ("закрой предыдущую вкладку", [("close_tab", {"which": "previous"})]),       # из лога: уходило в close_app
+    ("закрой педующую вкладку", [("close_tab", {"which": "previous"})]),         # так Whisper слышит
+    ("закрой прошлую вкладку", [("close_tab", {"which": "previous"})]),
+    ("закрой следующую вкладку", [("close_tab", {"which": "next"})]),
+    ("закрой правую вкладку", [("close_tab", {"which": "next"})]),
+    ("закрой остальные вкладки", [("close_tab", {"which": "others"})]),
+    ("закрой все вкладки кроме этой", [("close_tab", {"which": "others"})]),
+    ("закрой вкладку ютуб", [("close_tab", {"which": "name", "name": "ютуб"})]),
+    ("закрой вкладку с гитхабом", [("close_tab", {"which": "name", "name": "гитхабом"})]),
+    ("закрой ютуб вкладку", [("close_tab", {"which": "name", "name": "ютуб"})]),
+    ("перейди на вкладку ютуб", [("switch_tab", {"name": "ютуб"})]),
+    ("переключись на ютуб", [("switch_tab", {"name": "ютуб"})]),
+    ("вернись на вкладку переводчик", [("switch_tab", {"name": "переводчик"})]),
+    ("какие вкладки открыты", [("list_tabs", {})]),
+    ("сколько вкладок открыто", [("list_tabs", {})]),
+    ("первая вкладка", [("shortcut", {"action": "first_tab"})]),
+    ("перейди на последнюю вкладку", [("shortcut", {"action": "last_tab"})]),
+    ("закрой вкладку и открой ютуб", [("close_tab", {"which": "current"}), ("open_browser", {"site": "youtube"})]),
+    ("открой ютуб музыку", [("open_browser", {"site": "youtube_music"})]),       # из лога: открывался YouTube
+    ("открой youtube-музыку", [("open_browser", {"site": "youtube_music"})]),
     ("следующая вкладка", [("shortcut", {"action": "next_tab"})]),
     ("предыдущая вкладка", [("shortcut", {"action": "prev_tab"})]),
     ("обнови страницу", [("shortcut", {"action": "refresh"})]),
-    ("вперёд", [("shortcut", {"action": "forward"})]),
+    ("страницу назад", [("shortcut", {"action": "back"})]),                      # из лога: переключало трек
+    ("страницу вперёд", [("shortcut", {"action": "forward"})]),
+    ("вперёд в браузере", [("shortcut", {"action": "forward"})]),
     ("полный экран", [("shortcut", {"action": "fullscreen"})]),
     ("окно влево", [("shortcut", {"action": "window_left"})]),
     ("перемести окно вправо", [("shortcut", {"action": "window_right"})]),
@@ -265,15 +289,36 @@ def test_goes_to_llm(run, phrase):
     assert run(phrase) is None
 
 
-@pytest.mark.parametrize("exe,expected", [
-    ("firefox.exe", [("shortcut", {"action": "back"})]),
-    ("telegram.exe", [("media", {"action": "previous"})]),
+@pytest.mark.parametrize("phrase,kind,expected", [
+    ("назад", "browser", [("shortcut", {"action": "back"})]),
+    ("назад", "explorer", [("shortcut", {"action": "back"})]),
+    ("назад", "", [("media", {"action": "previous"})]),
+    ("вперёд", "browser", [("shortcut", {"action": "forward"})]),
+    ("вперёд", "", [("media", {"action": "next"})]),
+    ("закрой", "browser", [("close_tab", {"which": "current"})]),
+    ("закрой", "", ["=Что закрыть?"]),           # из лога: ИИ закрыл окно Firefox со всеми вкладками
 ])
-def test_back_depends_on_window(run, monkeypatch, exe, expected):
-    """«Назад» в браузере - страница назад, в остальных окнах - предыдущий трек."""
-    from core import system
-    monkeypatch.setattr(system, "foreground_exe", lambda: exe)
-    assert run("назад") == expected
+def test_depends_on_window(run, monkeypatch, phrase, kind, expected):
+    """«Назад», «вперёд», «закрой» в браузере - про страницу и вкладку, в остальных окнах - трек или вопрос."""
+    from core import browser
+    monkeypatch.setattr(browser, "foreground_kind", lambda: kind)
+    assert run(phrase) == expected
+
+
+@pytest.mark.parametrize("phrase,expected", [
+    ("предыдущая", [("shortcut", {"action": "prev_tab"})]),
+    ("следующую", [("shortcut", {"action": "next_tab"})]),
+    ("ещё", [("shortcut", {"action": "next_tab"})]),
+])
+def test_tab_context(run, monkeypatch, phrase, expected):
+    """Из лога: после «следующая вкладка» голое «предыдущая» переключало трек, а не вкладку."""
+    from core import browser
+    monkeypatch.setattr(browser, "in_tab_context", lambda: True)
+    assert run(phrase) == expected
+
+
+def test_no_tab_context_means_track(run):
+    assert run("предыдущая") == [("media", {"action": "previous", "target": None})]
 
 
 @pytest.mark.parametrize("phrase", ["теле... ничего не закрывай", "забудь", "ой, не то", "ладно, проехали"])

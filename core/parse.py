@@ -11,7 +11,6 @@ from typing import Callable
 
 from config import (
     BRIGHTNESS_STEP,
-    BROWSER_EXES,
     CURRENCY_HOME,
     MEDIA_FALLBACK_APP,
     VOLUME_STEP,
@@ -23,10 +22,16 @@ from phrases import (
     CURRENCY_WORDS,
     DRIVE_LETTERS,
     FOLDER_ALIASES,
+    FORWARD_OR_NEXT,
     GOOGLE,
     HEARING_FIXES,
     MUSIC_APP,
     SIDE_BY_SIDE,
+    TAB_CLOSE_NAMED,
+    TAB_CONTEXT_NEXT,
+    TAB_CONTEXT_PREV,
+    TAB_SWITCH_NAMED,
+    TAB_SWITCH_SITE,
     WINDOW_PLACE,
     YT,
 )
@@ -73,7 +78,7 @@ from core.apps import (  # noqa: F401
 from core.daily import (  # noqa: F401
     parse_duration,
 )
-from core import calc, system
+from core import browser, calc, system  # noqa: F401
 from core import tools
 from core.audio import (  # noqa: F401
     device_alias,
@@ -147,13 +152,15 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if R["undo_last"].search(seg):
         return lambda: tools.execute_tool("undo", {})
 
+    # Вкладки и голые «назад»/«вперёд» - раньше клавиш, «закрой X» и медиа
+    tab_action = parse_browser(seg)
+    if tab_action:
+        return tab_action
+
     # Клавиши. Должны идти раньше "закрой X", медиа и "открой X"
     for action, rx in SHORTCUT_RES:
         if rx.search(seg):
             return lambda a=action: tools.execute_tool("shortcut", {"action": a})
-    if BACK_OR_PREVIOUS_RE.match(seg):          # "назад": в браузере страница, иначе трек
-        return lambda: (tools.execute_tool("shortcut", {"action": "back"}) if system.foreground_exe() in BROWSER_EXES
-                        else tools.execute_tool("media", {"action": "previous"}))
 
     output_action = parse_audio_output(seg)     # «включи звук в наушниках» - не «включи звук»
     if output_action:
@@ -491,6 +498,63 @@ def parse_reminder(low: str) -> Callable[[], str] | None:
     return lambda: tools.execute_tool("add_reminder", {"at": at, "text": message})
 
 
+TAB_CLOSE_NAMED_RE = re.compile(TAB_CLOSE_NAMED)
+TAB_SWITCH_NAMED_RE = re.compile(TAB_SWITCH_NAMED)
+TAB_SWITCH_SITE_RE = re.compile(TAB_SWITCH_SITE)
+TAB_CONTEXT_NEXT_RE = re.compile(TAB_CONTEXT_NEXT)
+TAB_CONTEXT_PREV_RE = re.compile(TAB_CONTEXT_PREV)
+FORWARD_OR_NEXT_RE = re.compile(FORWARD_OR_NEXT)
+_NOT_TAB_NAME = re.compile(r"^(?:эт\w+|текущ\w+|активн\w+|все|всё|остальн\w+|други\w+|перв\w+|последн\w+|"
+                           r"следующ\w+|предыдущ\w+|прошл\w+|нов\w+|закрыт\w+|лев\w+|прав\w+)\b"
+                           r"|,|\b(?:и|а|потом|затем)\b")      # «закрой вкладку и открой ютуб» - это две команды
+
+
+def _tab(tool: str, args: dict) -> Callable[[], str]:
+    return lambda: tools.execute_tool(tool, args)
+
+
+def parse_browser(seg: str) -> Callable[[], str] | None:
+    """Вкладки: закрыть соседнюю / по названию / остальные, перейти на вкладку, список вкладок.
+    И голые «назад», «вперёд», «следующая»: смысл зависит от окна и от того, что делали только что."""
+    seg = seg.strip(PUNCT)
+    # Только что листали вкладки - «следующая», «ещё», «назад» продолжают листать (из лога: «предыдущая»
+    # после «следующая вкладка» переключала трек)
+    if browser.in_tab_context():
+        if TAB_CONTEXT_NEXT_RE.match(seg):
+            return _tab("shortcut", {"action": "next_tab"})
+        if TAB_CONTEXT_PREV_RE.match(seg):
+            return _tab("shortcut", {"action": "prev_tab"})
+    # «Назад», «вперёд»: в браузере и проводнике - страница, иначе трек
+    for rx, page, track in ((BACK_OR_PREVIOUS_RE, "back", "previous"), (FORWARD_OR_NEXT_RE, "forward", "next")):
+        if rx.match(seg):
+            return lambda p=page, t=track: (tools.execute_tool("shortcut", {"action": p}) if browser.foreground_kind()
+                                            else tools.execute_tool("media", {"action": t}))
+    # Голое «закрой»: в браузере - вкладка; иначе переспрашиваю, а не закрываю всё окно
+    # (из лога: ИИ на «закрой» закрыл окно Firefox со всеми вкладками)
+    if seg in ("закрой", "закрыть"):
+        return lambda: (tools.execute_tool("close_tab", {"which": "current"}) if browser.foreground_kind() == "browser"
+                        else f"{RAW}Что закрыть?")
+
+    for key, which in (("tab_close", "current"), ("tab_close_prev", "previous"),
+                       ("tab_close_next", "next"), ("tab_close_others", "others")):
+        if R[key].search(seg):
+            return _tab("close_tab", {"which": which})
+    if R["tab_list"].search(seg):
+        return _tab("list_tabs", {})
+    m = TAB_CLOSE_NAMED_RE.match(seg)
+    if m:
+        name = (m.group("name") or m.group("name2") or "").strip(PUNCT)
+        if name and not _NOT_TAB_NAME.search(name):
+            return _tab("close_tab", {"which": "name", "name": name})
+    m = TAB_SWITCH_NAMED_RE.match(seg)
+    if m and not _NOT_TAB_NAME.search(m.group("name")):
+        return _tab("switch_tab", {"name": m.group("name").strip(PUNCT)})
+    m = TAB_SWITCH_SITE_RE.match(seg)
+    if m and exact_site(m.group("name")):
+        return _tab("switch_tab", {"name": m.group("name").strip(PUNCT)})
+    return None
+
+
 def parse_media(seg: str) -> Callable[[], str] | None:
     """Фраза только из глагола, цели и связок: "поставь ютуб на паузу", "следующий трек"."""
     seg = seg.strip(PUNCT)
@@ -593,7 +657,8 @@ def fix_hearing(low: str) -> str:
 # После этих команд продолжения не бывает, их можно выполнять после короткой паузы
 _QUICK_KEYS = ("time", "date", "weekday", "datefull", "sleep_mode", "now_playing", "mute", "unmute",
                "media_next", "media_prev", "media_pause", "media_play",
-               "track_like", "track_unlike", "track_dislike", "volume_up", "volume_down", "bright_up", "bright_down")
+               "track_like", "track_unlike", "track_dislike", "volume_up", "volume_down", "bright_up", "bright_down",
+               "tab_close", "tab_close_prev", "tab_close_next", "tab_list")
 
 
 def is_quick_command(text: str, need_name: bool = True, pending: bool = False) -> bool:
@@ -616,7 +681,7 @@ def is_quick_command(text: str, need_name: bool = True, pending: bool = False) -
         return False
     if parse_media(body) or parse_app_volume(body) or parse_audio_output(body):
         return True
-    if any(rx.search(body) for _, rx in SHORTCUT_RES):
+    if any(rx.search(body) for _, rx in SHORTCUT_RES) or FORWARD_OR_NEXT_RE.match(body):
         return True
     if (R["volume_set"].search(body) or R["bright_set"].search(body)) and parse_number(body) is not None:
         return True
@@ -638,8 +703,11 @@ def _bare_name(segment: str) -> bool:
 def parse_all(low: str) -> list[Callable[[], str]] | None:
     """Разбирает всю команду. Если хоть одна часть не разобралась - None, и всё уходит в ИИ."""
     low = fix_hearing(low)
-    if BACK_OR_PREVIOUS_RE.match(low) or any(rx.search(low) for _, rx in SHORTCUT_RES):
-        return [parse_local(low)]                       # «назад», «назад в браузере» - до медиа и поиска
+    tab_action = parse_browser(low)                     # «назад», «закрой вкладку ютуб» - до медиа и поиска
+    if tab_action:
+        return [tab_action]
+    if any(rx.search(low) for _, rx in SHORTCUT_RES):
+        return [parse_local(low)]                       # «назад в браузере», «следующая вкладка»
     if MUSIC_APP_RE.fullmatch(low):                     # «запусти яндекс музыку» - открыть и сразу включить
         return [lambda: tools.execute_tool("play_app", {"name": MEDIA_FALLBACK_APP["music"]})]
     # "ютуб стоп" - пауза, "ютуб на 30" - громкость, а не поиск; напоминание по "и" не режу

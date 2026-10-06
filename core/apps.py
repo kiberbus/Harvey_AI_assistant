@@ -16,7 +16,6 @@ from pathlib import Path
 
 from config import (
     BROWSER_EXE,
-    BROWSER_EXES,
     DICTATION_MODE,
     DOCUMENT_EXES,
     FOLDERS,
@@ -72,6 +71,7 @@ from core.speech import (  # noqa: F401
     play_sound,
     speak,
 )
+from core import browser
 
 
 def set_brightness(level: int) -> str:
@@ -446,14 +446,12 @@ def close_app(name: str) -> str:
     if folder:
         return folder
     targets = _target_exes(name)
-    if not _find_procs(targets, set()):
-        tab = _close_site_tab(name)
-        if tab:
+    if not _find_procs(targets, set()) and _site_keywords(name):
+        # «закрой ютуб» - вкладка, причём любая, а не только активная (её ищу в полосе вкладок)
+        tab = browser.close_tab(name=name)
+        if not tab.startswith((INFO, FAIL)):
             return tab
     return _close_exes(targets, name)
-
-
-_VK_W = 0x57
 
 
 def _top_windows() -> list[tuple[int, str, str, int]]:
@@ -503,26 +501,6 @@ def _site_keywords(name: str) -> set[str]:
             host = urllib.parse.urlparse(SITES[site]).hostname or ""
             return {low, site, host.removeprefix("www.").split(".")[0]}
     return set()
-
-
-def _close_site_tab(name: str) -> str | None:
-    """Заголовок окна показывает только активную вкладку, поэтому вывожу окно вперёд и жму Ctrl+W.
-    None - вкладку не нашёл."""
-    keywords = _site_keywords(name)
-    if not keywords or psutil is None:
-        return None
-    browser_pids = {p.pid for p in psutil.process_iter(["name"]) if (p.info["name"] or "").lower() in BROWSER_EXES}
-    for hwnd, title, _, pid in _top_windows():
-        if pid in browser_pids and any(k in title.lower() for k in keywords):
-            if _user32.IsIconic(hwnd):
-                _user32.ShowWindow(hwnd, SW_RESTORE)
-            _force_foreground(hwnd)
-            time.sleep(0.15)
-            if _user32.GetForegroundWindow() != hwnd:
-                return f"{FAIL}не получилось переключиться на вкладку {name}"
-            _chord(VK_CONTROL, _VK_W)
-            return f"закрыл{END} вкладку {name}"
-    return None
 
 
 def close_active(window_only: bool = False) -> str:

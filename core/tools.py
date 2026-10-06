@@ -69,7 +69,7 @@ from core.daily import (  # noqa: F401
 from core.tray import (  # noqa: F401
     restart_self,
 )
-from core import calc, system, undo
+from core import browser, calc, system, undo
 
 
 FUNCTIONS: dict[str, Callable[..., str]] = {
@@ -110,6 +110,9 @@ FUNCTIONS: dict[str, Callable[..., str]] = {
     "media": media,
     "now_playing": now_playing,
     "rate_track": rate_track,
+    "close_tab": browser.close_tab,
+    "switch_tab": browser.switch_tab,
+    "list_tabs": browser.list_tabs,
     "restart_self": restart_self,
     "app_volume": app_volume,
     "play_app": play_app,
@@ -180,6 +183,12 @@ TOOLS = [
                       "description": "Чем управлять; не указывай, если пользователь не уточнил"}},
           ["action"]),
     _tool("now_playing", "Сказать, что сейчас играет: название и исполнителя.", {}, []),
+    _tool("close_tab", "Закрыть вкладку браузера: текущую, соседнюю, все кроме текущей или по названию сайта.",
+          {"which": {"type": "string", "enum": ["current", "previous", "next", "others", "name"]},
+           "name": {"type": "string", "description": "Название сайта или вкладки, если which=name"}}, ["which"]),
+    _tool("switch_tab", "Перейти на открытую вкладку браузера по названию сайта.",
+          {"name": {"type": "string"}}, ["name"]),
+    _tool("list_tabs", "Сказать, какие вкладки открыты в браузере.", {}, []),
     _tool("rate_track", "Лайк текущей песне в Яндекс Музыке (добавить в «Мне нравится»), снять лайк или дизлайк.",
           {"action": {"type": "string", "enum": ["like", "unlike", "dislike"]}}, ["action"]),
     _tool("app_volume", "Громкость одного приложения (не общая): музыки, ютуба, видео или программы по названию.",

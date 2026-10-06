@@ -175,6 +175,7 @@ BROWSER_EXE = None               # None - браузер по умолчанию
 
 SITES = {
     "youtube": "https://www.youtube.com",
+    "youtube_music": "https://music.youtube.com",
     "google": "https://www.google.com",
     "github": "https://github.com",
     "translate": "https://translate.google.com",
