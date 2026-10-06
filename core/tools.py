@@ -105,9 +105,9 @@ FUNCTIONS: dict[str, Callable[..., str]] = {
     "set_volume": set_volume,
     "change_volume": change_volume,
     "mute": mute,
-    "media": media,
     "audio_output": set_output_device,
     "audio_output_info": output_device_info,
+    "media": media,
     "now_playing": now_playing,
     "rate_track": rate_track,
     "restart_self": restart_self,
@@ -170,6 +170,10 @@ TOOLS = [
     _tool("set_volume", "Установить громкость компьютера в процентах.", {"level": _PERCENT}, ["level"]),
     _tool("change_volume", "Изменить громкость на указанное число процентов.", {"delta": _DELTA}, ["delta"]),
     _tool("mute", "Выключить (true) или включить (false) звук.", {"state": {"type": "boolean"}}, ["state"]),
+    _tool("audio_output", "Переключить вывод звука на другое устройство: наушники, колонки, монитор. "
+                          "Без target - на следующее по кругу.",
+          {"target": {"type": "string", "description": "Куда: наушники, колонки, монитор или название устройства"}},
+          []),
     _tool("media", "Управление музыкой/видео, в том числе фоновым плеером.",
           {"action": {"type": "string", "enum": ["pause", "play", "next", "previous"]},
            "target": {"type": "string", "enum": ["music", "youtube", "video"],
@@ -183,10 +187,6 @@ TOOLS = [
            "level": _PERCENT, "delta": _DELTA}, ["target"]),
     _tool("set_brightness", "Установить яркость экрана в процентах.", {"level": _PERCENT}, ["level"]),
     _tool("change_brightness", "Изменить яркость экрана на указанное число процентов.", {"delta": _DELTA}, ["delta"]),
-    _tool("audio_output", "Переключить вывод звука на другое устройство: наушники, колонки, монитор. "
-                          "Без target - на следующее по кругу.",
-          {"target": {"type": "string", "description": "Куда: наушники, колонки, монитор или название устройства"}},
-          []),
     _tool("shortcut", "Нажать сочетание клавиш в активном окне: копировать, вставить, отменить, сохранить, "
                       "выделить всё, очистить поле, Enter, вкладки браузера, обновить, назад, полный экран, "
                       "окно влево/вправо, окно на другой монитор.",

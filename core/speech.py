@@ -373,6 +373,32 @@ class Chimes:
 
 _chimes = Chimes()
 
+# PortAudio запоминает устройство по умолчанию при запуске и после «переключи звук на наушники»
+# продолжает играть в старое. Перезапустить PortAudio нельзя - оборвётся поток микрофона,
+# поэтому после переключения выбираю устройство по имени сам
+_output_name: str | None = None
+
+
+def _output_index(api: str) -> int | None:
+    """Номер устройства вывода в PortAudio по имени. MME обрезает имена до 31 знака,
+    поэтому сравниваю начало."""
+    try:
+        name = _output_name or sd.query_devices(kind="output")["name"]
+        for i, d in enumerate(sd.query_devices()):
+            if (d["max_output_channels"] and api in sd.query_hostapis(d["hostapi"])["name"]
+                    and d["name"][:28] == name[:28]):
+                return i
+    except Exception:
+        pass
+    return None
+
+
+def follow_output(name: str) -> None:
+    """Windows переключила звук на устройство name - речь и сигналы теперь туда же."""
+    global _output_name
+    _output_name = name
+    _chimes.close_if_idle(force=True)
+
 
 def play_beep() -> None:
     """Сигнал "слушаю" - сразу, без синтеза речи."""
@@ -430,32 +456,6 @@ def _synth_worker() -> None:
                 elif _tts_ready():
                     audio = _synthesize(payload)
                 else:
-# PortAudio запоминает устройство по умолчанию при запуске и после «переключи звук на наушники»
-# продолжает играть в старое. Перезапустить PortAudio нельзя - оборвётся поток микрофона,
-# поэтому после переключения выбираю устройство по имени сам
-_output_name: str | None = None
-
-
-def _output_index(api: str) -> int | None:
-    """Номер устройства вывода в PortAudio по имени. MME обрезает имена до 31 знака,
-    поэтому сравниваю начало."""
-    try:
-        name = _output_name or sd.query_devices(kind="output")["name"]
-        for i, d in enumerate(sd.query_devices()):
-            if (d["max_output_channels"] and api in sd.query_hostapis(d["hostapi"])["name"]
-                    and d["name"][:28] == name[:28]):
-                return i
-    except Exception:
-        pass
-    return None
-
-
-def follow_output(name: str) -> None:
-    """Windows переключила звук на устройство name - речь и сигналы теперь туда же."""
-    global _output_name
-    _output_name = name
-    _chimes.close_if_idle(force=True)
-
                     log("TTS", "Голосовая модель не загружена")
             except Exception as e:
                 log("TTS", f"Ошибка синтеза: {e}")

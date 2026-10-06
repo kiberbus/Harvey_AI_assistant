@@ -75,6 +75,9 @@ from core.daily import (  # noqa: F401
 )
 from core import calc, system
 from core import tools
+from core.audio import (  # noqa: F401
+    device_alias,
+)
 
 
 def _currency_codes(seg: str) -> list[str]:
@@ -92,9 +95,6 @@ SIDE_BY_SIDE_RES = [re.compile(p) for p in SIDE_BY_SIDE]
 
 def _known_app(name: str) -> bool:
     name = name.strip()
-from core.audio import (  # noqa: F401
-    device_alias,
-)
     return name in APP_ALIASES or find_app(name) is not None
 
 
@@ -149,15 +149,15 @@ def parse_local(segment: str) -> Callable[[], str] | None:
 
     # Клавиши. Должны идти раньше "закрой X", медиа и "открой X"
     for action, rx in SHORTCUT_RES:
-
-    output_action = parse_audio_output(seg)     # «включи звук в наушниках» - не «включи звук»
-    if output_action:
-        return output_action
         if rx.search(seg):
             return lambda a=action: tools.execute_tool("shortcut", {"action": a})
     if BACK_OR_PREVIOUS_RE.match(seg):          # "назад": в браузере страница, иначе трек
         return lambda: (tools.execute_tool("shortcut", {"action": "back"}) if system.foreground_exe() in BROWSER_EXES
                         else tools.execute_tool("media", {"action": "previous"}))
+
+    output_action = parse_audio_output(seg)     # «включи звук в наушниках» - не «включи звук»
+    if output_action:
+        return output_action
 
     # Микрофон раньше "заглуши" (это общий звук), состояние ПК раньше погоды
     if R["mic_off"].search(seg):
@@ -360,25 +360,6 @@ def _volume_target(seg: str) -> tuple[str | None, str]:
     return None, seg
 
 
-def parse_app_volume(seg: str) -> Callable[[], str] | None:
-    """"музыку тише", "ютуб на 30", "громкость телеграма 50"."""
-    seg = seg.strip(PUNCT)
-    target, rest = _volume_target(seg)
-    if target is None:
-        return None
-    up, down = APP_VOLUME_UP_RE.search(rest), APP_VOLUME_DOWN_RE.search(rest)
-    num = parse_number(rest)
-    explicit = re.search(r"громкост|\bзвук|\bна\s+\S|процент|%", rest)   # "ютуб 30" без "на" - это поиск
-    if up and down or not (up or down or (num is not None and explicit)):
-        return None
-    leftover = APP_VOLUME_FILLER_RE.sub(" ", _NUMBER_WORD_RE.sub(" ", re.sub(r"\d+", " ", rest)))
-    leftover = APP_VOLUME_DOWN_RE.sub(" ", APP_VOLUME_UP_RE.sub(" ", leftover))
-    if leftover.strip(PUNCT + " "):
-        return None                       # лишние слова - не это правило
-    if up or down:
-        delta = (num or VOLUME_STEP) * (1 if up else -1)
-        return lambda: tools.execute_tool("app_volume", {"target": target, "delta": delta})
-    return lambda: tools.execute_tool("app_volume", {"target": target, "level": num})
 AUDIO_OUTPUT_RE = re.compile(AUDIO_OUTPUT)
 AUDIO_OUTPUT_SHORT_RE = re.compile(AUDIO_OUTPUT_SHORT)
 _NOT_DEVICE_RE = re.compile(r"\d|процент|громкост|максимум|полную|минимум")   # «переключи звук на 50»
@@ -407,6 +388,25 @@ def _whole_audio_output(low: str) -> Callable[[], str] | None:
     return None if SPLIT_RE.search(low) else parse_audio_output(low)
 
 
+def parse_app_volume(seg: str) -> Callable[[], str] | None:
+    """"музыку тише", "ютуб на 30", "громкость телеграма 50"."""
+    seg = seg.strip(PUNCT)
+    target, rest = _volume_target(seg)
+    if target is None:
+        return None
+    up, down = APP_VOLUME_UP_RE.search(rest), APP_VOLUME_DOWN_RE.search(rest)
+    num = parse_number(rest)
+    explicit = re.search(r"громкост|\bзвук|\bна\s+\S|процент|%", rest)   # "ютуб 30" без "на" - это поиск
+    if up and down or not (up or down or (num is not None and explicit)):
+        return None
+    leftover = APP_VOLUME_FILLER_RE.sub(" ", _NUMBER_WORD_RE.sub(" ", re.sub(r"\d+", " ", rest)))
+    leftover = APP_VOLUME_DOWN_RE.sub(" ", APP_VOLUME_UP_RE.sub(" ", leftover))
+    if leftover.strip(PUNCT + " "):
+        return None                       # лишние слова - не это правило
+    if up or down:
+        delta = (num or VOLUME_STEP) * (1 if up else -1)
+        return lambda: tools.execute_tool("app_volume", {"target": target, "delta": delta})
+    return lambda: tools.execute_tool("app_volume", {"target": target, "level": num})
 
 
 def _numbers_to_digits(text: str) -> str:
