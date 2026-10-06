@@ -67,7 +67,7 @@ from core.daily import (  # noqa: F401
 from core.tray import (  # noqa: F401
     restart_self,
 )
-from core import calc, system
+from core import calc, system, undo
 
 
 FUNCTIONS: dict[str, Callable[..., str]] = {
@@ -120,6 +120,7 @@ FUNCTIONS: dict[str, Callable[..., str]] = {
     "gpu_status": system.gpu_status,
     "microphone": system.microphone,
     "calculate": calc.calculate,
+    "undo": undo.undo,
 }
 
 
@@ -182,6 +183,9 @@ TOOLS = [
                       "выделить всё, очистить поле, Enter, вкладки браузера, обновить, назад, полный экран, "
                       "окно влево/вправо, окно на другой монитор.",
           {"action": {"type": "string", "enum": list(system.SHORTCUT_KEYS)}}, ["action"]),
+    _tool("undo", "Отменить последнее действие ассистента: вернуть громкость или яркость, открыть заново "
+                  "закрытое окно, убрать вставленный текст. Без kind - самое последнее, иначе Ctrl+Z.",
+          {"kind": {"type": "string", "enum": ["volume", "brightness", "close", "text"]}}, []),
     _tool("system_status", "Загрузка процессора и оперативной памяти.", {}, []),
     _tool("gpu_status", "Температура и загрузка видеокарты.", {}, []),
     _tool("microphone", "Включить (true) или выключить (false) микрофон.", {"state": {"type": "boolean"}}, ["state"]),
@@ -193,8 +197,10 @@ def execute_tool(name: str, args: dict) -> str:
     if fn is None:
         return f"{FAIL}не знаю инструмент {name}"
     try:
+        state = undo.before(name, args)          # как было - для «отмени»
         result = fn(**args)
         log("Результат", f"{name}: {result}")
+        undo.after(name, args, state, result)
         return result
     except Exception as e:
         log("Ошибка", f"{name}({args}): {e}")
@@ -203,7 +209,9 @@ def execute_tool(name: str, args: dict) -> str:
 
 def execute_tool_dictate(text: str) -> str:
     try:
-        return dictate(text)
+        result = dictate(text)
+        undo.after("dictate", {}, None, result)
+        return result
     except Exception as e:
         log("Ошибка", f"dictate: {e}")
         return f"{FAIL}не смог{'ла' if FEMALE_VOICE else ''} записать текст"

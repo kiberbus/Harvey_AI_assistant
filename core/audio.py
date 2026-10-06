@@ -200,6 +200,18 @@ def change_volume(delta: int) -> str:
     return f"{'прибавил' if delta > 0 else 'убавил'}{END} громкость до {new} процентов"
 
 
+def volume_state() -> tuple[int, bool]:
+    """(громкость в процентах, выключен ли звук) - чтобы потом вернуть как было."""
+    ev = _endpoint_volume()
+    return round(ev.GetMasterVolumeLevelScalar() * 100), bool(ev.GetMute())
+
+
+def restore_volume(level: int, muted: bool) -> None:
+    ev = _endpoint_volume()
+    ev.SetMasterVolumeLevelScalar(_clamp(level) / 100, None)
+    ev.SetMute(1 if muted else 0, None)
+
+
 def mute(state: bool = True) -> str:
     _endpoint_volume().SetMute(1 if state else 0, None)
     return f"{'выключил' if state else 'включил'}{END} звук"

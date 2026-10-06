@@ -134,6 +134,14 @@ def parse_local(segment: str) -> Callable[[], str] | None:
         if R[key].search(seg):
             return lambda a=action: tools.execute_tool("rate_track", {"action": a})
 
+    # Отмена раньше клавиш и «открой X»: «отмени» - не всегда Ctrl+Z, «открой обратно» - не приложение
+    for key, kind in (("undo_volume", "volume"), ("undo_brightness", "brightness"), ("undo_close", "close"),
+                      ("undo_text", "text")):
+        if R[key].search(seg):
+            return lambda k=kind: tools.execute_tool("undo", {"kind": k})
+    if R["undo_last"].search(seg):
+        return lambda: tools.execute_tool("undo", {})
+
     # Клавиши. Должны идти раньше "закрой X", медиа и "открой X"
     for action, rx in SHORTCUT_RES:
         if rx.search(seg):
