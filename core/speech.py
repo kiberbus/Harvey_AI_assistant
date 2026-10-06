@@ -325,8 +325,9 @@ class Chimes:
             self._last_used = time.time()
             if self._stream is not None:
                 return
-            # Сначала WASAPI (~20 мс), если не вышло - MME по умолчанию (~90 мс)
-            for device, extra in ((self._wasapi_device(), sd.WasapiSettings(auto_convert=True)), (None, None)):
+            # Сначала WASAPI (~20 мс), если не вышло - MME (~90 мс)
+            for device, extra in ((_output_index("WASAPI"), sd.WasapiSettings(auto_convert=True)),
+                                  (_output_index("MME") if _output_name else None, None)):
                 if device is None and extra is not None:
                     continue
                 try:
@@ -337,18 +338,6 @@ class Chimes:
                 except Exception as e:
                     self._stream = None
                     log("Звук", f"не удалось открыть поток для сигналов ({'WASAPI' if extra else 'MME'}): {e}")
-
-    @staticmethod
-    def _wasapi_device() -> int | None:
-        try:
-            default = sd.query_devices(kind="output")["name"]
-            for i, d in enumerate(sd.query_devices()):
-                api = sd.query_hostapis(d["hostapi"])["name"]
-                if d["max_output_channels"] and "WASAPI" in api and d["name"].startswith(default[:28]):
-                    return i
-        except Exception:
-            pass
-        return None
 
     def _callback(self, outdata, frames, time_info, status) -> None:
         out = np.zeros(frames, dtype=np.float32)
@@ -368,9 +357,11 @@ class Chimes:
             self._voices.append([samples, 0])
             return True
 
-    def close_if_idle(self) -> None:
+    def close_if_idle(self, force: bool = False) -> None:
+        """force - закрыть сразу: сменилось устройство вывода, следующий сигнал откроет поток на новом."""
         with self._lock:
-            if self._stream is None or self._voices or time.time() - self._last_used < CHIME_IDLE_SEC:
+            if self._stream is None or not force and (
+                    self._voices or time.time() - self._last_used < CHIME_IDLE_SEC):
                 return
             stream, self._stream = self._stream, None
         try:
@@ -389,7 +380,7 @@ def play_beep() -> None:
         time.sleep(len(_WAKE_SOUND) / SOUND_RATE * 0.6)   # ждём основную часть: дальше выбросим её эхо
         return
     try:
-        sd.play(_WAKE_SOUND, samplerate=SOUND_RATE)
+        sd.play(_WAKE_SOUND, samplerate=SOUND_RATE, device=_output_index("MME") if _output_name else None)
         sd.wait()
     except Exception:
         pass
@@ -439,6 +430,32 @@ def _synth_worker() -> None:
                 elif _tts_ready():
                     audio = _synthesize(payload)
                 else:
+# PortAudio запоминает устройство по умолчанию при запуске и после «переключи звук на наушники»
+# продолжает играть в старое. Перезапустить PortAudio нельзя - оборвётся поток микрофона,
+# поэтому после переключения выбираю устройство по имени сам
+_output_name: str | None = None
+
+
+def _output_index(api: str) -> int | None:
+    """Номер устройства вывода в PortAudio по имени. MME обрезает имена до 31 знака,
+    поэтому сравниваю начало."""
+    try:
+        name = _output_name or sd.query_devices(kind="output")["name"]
+        for i, d in enumerate(sd.query_devices()):
+            if (d["max_output_channels"] and api in sd.query_hostapis(d["hostapi"])["name"]
+                    and d["name"][:28] == name[:28]):
+                return i
+    except Exception:
+        pass
+    return None
+
+
+def follow_output(name: str) -> None:
+    """Windows переключила звук на устройство name - речь и сигналы теперь туда же."""
+    global _output_name
+    _output_name = name
+    _chimes.close_if_idle(force=True)
+
                     log("TTS", "Голосовая модель не загружена")
             except Exception as e:
                 log("TTS", f"Ошибка синтеза: {e}")
@@ -453,7 +470,7 @@ def _play_worker() -> None:
         (samples, rate), gen = _play_queue.get()
         try:
             if gen == _tts_gen:
-                sd.play(samples, samplerate=rate)
+                sd.play(samples, samplerate=rate, device=_output_index("MME") if _output_name else None)
                 sd.wait()
         except Exception as e:
             log("TTS", f"Ошибка воспроизведения: {e}")

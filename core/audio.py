@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import ctypes
 import json
+import re
 import time
 
 from config import (
+    AUDIO_DEVICES,
+    AUDIO_DEVICES_SKIP,
     BASE_DIR,
     DUCK_FACTOR,
     DUCK_MAX_SEC,
@@ -16,8 +19,13 @@ from config import (
 from core.util import (  # noqa: F401
     AudioUtilities,
     CLSCTX_ALL,
+    DEVICE_STATE,
+    EDataFlow,
     END,
+    ERole,
+    FAIL,
     HAS_PYCAW,
+    INFO,
     IAudioEndpointVolume,
     IAudioMeterInformation,
     OWN_PID,
@@ -215,3 +223,78 @@ def restore_volume(level: int, muted: bool) -> None:
 def mute(state: bool = True) -> str:
     _endpoint_volume().SetMute(1 if state else 0, None)
     return f"{'выключил' if state else 'включил'}{END} звук"
+
+
+def device_alias(target: str) -> str | None:
+    """«в наушниках» → «наушники» (ключ AUDIO_DEVICES). Сравниваю по первым пяти буквам,
+    чтобы подходили любые падежи."""
+    words = re.findall(r"\w+", target.lower())
+    for alias in AUDIO_DEVICES:
+        if any(len(w) >= 5 and w[:5] == alias[:5] for w in words):
+            return alias
+    return None
+
+
+def _output_devices() -> list:
+    """Включённые устройства вывода без виртуальных (AUDIO_DEVICES_SKIP)."""
+    if not HAS_PYCAW:
+        raise RuntimeError("pycaw не установлен")
+    devices = AudioUtilities.GetAllDevices(EDataFlow.eRender.value, DEVICE_STATE.ACTIVE.value)
+    return [d for d in devices
+            if d.FriendlyName and not any(s in d.FriendlyName.lower() for s in AUDIO_DEVICES_SKIP)]
+
+
+def _find_output(target: str, devices: list):
+    """Устройство по словам из фразы: сначала псевдоним из AUDIO_DEVICES, потом само название («fifine»)."""
+    alias = device_alias(target)
+    if alias:
+        for part in AUDIO_DEVICES[alias]:
+            for d in devices:
+                if part in d.FriendlyName.lower():
+                    return d
+        return None
+    words = [w for w in re.findall(r"\w+", target.lower()) if len(w) >= 3]
+    for d in devices:
+        if any(w in d.FriendlyName.lower() for w in words):
+            return d
+    return None
+
+
+def _device_label(device) -> str:
+    """Как назвать устройство вслух: «наушники», а не «Speakers (fifine SC3)»."""
+    name = device.FriendlyName.lower()
+    for alias, parts in AUDIO_DEVICES.items():
+        if any(part in name for part in parts):
+            return alias
+    inner = re.search(r"\(([^()]+)\)", device.FriendlyName)    # «Speakers (fifine SC3)» → «fifine SC3»
+    return inner.group(1) if inner else device.FriendlyName
+
+
+def set_output_device(target: str = "") -> str:
+    """«Переключи звук на наушники». Без цели - на следующее устройство по кругу."""
+    devices = _output_devices()
+    current = AudioUtilities.GetSpeakers().id
+    if target:
+        device = _find_output(target, devices)
+        if device is None:
+            log("Звук", f"нет устройства «{target}», есть: {', '.join(d.FriendlyName for d in devices)}")
+            return f"{FAIL}{'не нашла' if END else 'не нашёл'} устройство {target}"
+    else:
+        if len(devices) < 2:
+            return f"{INFO}другого устройства вывода нет"
+        ids = [d.id for d in devices]
+        device = devices[(ids.index(current) + 1) % len(devices)] if current in ids else devices[0]
+    label = device_alias(target) or _device_label(device)       # «в наушниках» → «наушники»
+    if device.id == current:
+        return f"{INFO}звук уже идёт через {label}"
+    # Все три роли: иначе звонки (Discord, Telegram) остались бы на старом устройстве
+    AudioUtilities.SetDefaultDevice(device.id, [ERole.eConsole, ERole.eMultimedia, ERole.eCommunications])
+    log("Звук", f"устройство вывода: {device.FriendlyName}")
+    from core import speech           # speech импортирует audio, поэтому не наверху
+    speech.follow_output(device.FriendlyName)
+    return f"переключил{END} звук на {label}"
+
+
+def output_device_info() -> str:
+    """«Куда идёт звук»."""
+    return f"{INFO}звук идёт через {_device_label(AudioUtilities.GetSpeakers())}"

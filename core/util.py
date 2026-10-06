@@ -61,6 +61,7 @@ except Exception:  # psutil ставится вместе с pycaw
 
 try:
     from comtypes import CLSCTX_ALL
+    from pycaw.constants import DEVICE_STATE, EDataFlow, ERole
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume, IAudioMeterInformation
 
     HAS_PYCAW = True

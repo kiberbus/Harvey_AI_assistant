@@ -17,6 +17,8 @@ from config import (
     VOLUME_STEP,
 )
 from phrases import (
+    AUDIO_OUTPUT,
+    AUDIO_OUTPUT_SHORT,
     BARE_FOLDERS,
     CURRENCY_WORDS,
     DRIVE_LETTERS,
@@ -90,6 +92,9 @@ SIDE_BY_SIDE_RES = [re.compile(p) for p in SIDE_BY_SIDE]
 
 def _known_app(name: str) -> bool:
     name = name.strip()
+from core.audio import (  # noqa: F401
+    device_alias,
+)
     return name in APP_ALIASES or find_app(name) is not None
 
 
@@ -144,6 +149,10 @@ def parse_local(segment: str) -> Callable[[], str] | None:
 
     # Клавиши. Должны идти раньше "закрой X", медиа и "открой X"
     for action, rx in SHORTCUT_RES:
+
+    output_action = parse_audio_output(seg)     # «включи звук в наушниках» - не «включи звук»
+    if output_action:
+        return output_action
         if rx.search(seg):
             return lambda a=action: tools.execute_tool("shortcut", {"action": a})
     if BACK_OR_PREVIOUS_RE.match(seg):          # "назад": в браузере страница, иначе трек
@@ -370,6 +379,34 @@ def parse_app_volume(seg: str) -> Callable[[], str] | None:
         delta = (num or VOLUME_STEP) * (1 if up else -1)
         return lambda: tools.execute_tool("app_volume", {"target": target, "delta": delta})
     return lambda: tools.execute_tool("app_volume", {"target": target, "level": num})
+AUDIO_OUTPUT_RE = re.compile(AUDIO_OUTPUT)
+AUDIO_OUTPUT_SHORT_RE = re.compile(AUDIO_OUTPUT_SHORT)
+_NOT_DEVICE_RE = re.compile(r"\d|процент|громкост|максимум|полную|минимум")   # «переключи звук на 50»
+
+
+def parse_audio_output(seg: str) -> Callable[[], str] | None:
+    """«Переключи звук на наушники», «переключи звук» (по кругу), «куда идёт звук».
+    Проверяется раньше медиа («переключи» - следующий трек) и «включи звук»."""
+    seg = seg.strip(PUNCT)
+    if R["audio_output_next"].search(seg):
+        return lambda: tools.execute_tool("audio_output", {})
+    if R["audio_output_which"].search(seg):
+        return lambda: tools.execute_tool("audio_output_info", {})
+    m = AUDIO_OUTPUT_RE.match(seg)
+    if m and (device_alias(m.group("target")) or m.group("verb") and not _NOT_DEVICE_RE.search(m.group("target"))):
+        return lambda t=m.group("target"): tools.execute_tool("audio_output", {"target": t})
+    m = AUDIO_OUTPUT_SHORT_RE.match(seg)
+    if m and device_alias(m.group("target")):
+        return lambda t=m.group("target"): tools.execute_tool("audio_output", {"target": t})
+    return None
+
+
+def _whole_audio_output(low: str) -> Callable[[], str] | None:
+    """Целиком - только без «и»: «переключи звук на наушники и громкость 30» режется на части,
+    иначе громкость попала бы в название устройства."""
+    return None if SPLIT_RE.search(low) else parse_audio_output(low)
+
+
 
 
 def _numbers_to_digits(text: str) -> str:
@@ -577,7 +614,7 @@ def is_quick_command(text: str, need_name: bool = True, pending: bool = False) -
         return True
     if parse_all(body) is None:
         return False
-    if parse_media(body) or parse_app_volume(body):
+    if parse_media(body) or parse_app_volume(body) or parse_audio_output(body):
         return True
     if any(rx.search(body) for _, rx in SHORTCUT_RES):
         return True
@@ -606,7 +643,7 @@ def parse_all(low: str) -> list[Callable[[], str]] | None:
     if MUSIC_APP_RE.fullmatch(low):                     # «запусти яндекс музыку» - открыть и сразу включить
         return [lambda: tools.execute_tool("play_app", {"name": MEDIA_FALLBACK_APP["music"]})]
     # "ютуб стоп" - пауза, "ютуб на 30" - громкость, а не поиск; напоминание по "и" не режу
-    whole = parse_side_by_side(low) or parse_reminder(low) or parse_app_volume(low) or parse_media(low) or parse_search(low)
+    whole = parse_side_by_side(low) or parse_reminder(low) or _whole_audio_output(low) or parse_app_volume(low) or parse_media(low) or parse_search(low)
     if whole:
         return [whole]
     if calc.parse(low):                                 # «2 плюс 2», «5 миль в километрах», «доллар к тенге»
