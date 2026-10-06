@@ -6,8 +6,7 @@ TTS:  piper-tts или Silero (локально, выбирается в config.
 Wake: непрерывное слушание, «Харви + команда» одной фразой.
 
 Зависимости:
-    pip install ollama sounddevice numpy faster-whisper piper-tts pycaw comtypes psutil screen-brightness-control
-    (по желанию, для голоса Silero)  pip install silero torch
+    python -m pip install -r requirements.txt
 
 Файлы: config.py — все настройки, phrases.py — варианты фраз-команд, harvey.py — код.
 

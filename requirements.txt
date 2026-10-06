@@ -1,0 +1,31 @@
+# Харви — зависимости (Python 3.11, Windows 10/11)
+# Установка:  python -m pip install -r requirements.txt
+# Для Whisper на видеокарте нужен драйвер NVIDIA с CUDA 12; без неё Харви сама перейдёт на процессор.
+
+# Речь: распознавание, слово-активатор, синтез
+faster-whisper>=1.2
+openwakeword>=0.6
+onnxruntime>=1.20
+piper-tts>=1.2
+silero>=0.5
+torch>=2.3
+sounddevice>=0.5
+numpy>=1.26
+
+# Локальная языковая модель
+ollama>=0.4
+
+# Windows: звук, плееры (SMTC), окна, трей, яркость
+comtypes>=1.4
+pycaw>=20240210
+psutil>=5.9
+pystray>=0.19
+pillow>=10.0
+screen-brightness-control>=0.20
+winrt-runtime>=2.0
+winrt-Windows.Foundation>=2.0
+winrt-Windows.Foundation.Collections>=2.0
+winrt-Windows.Media.Control>=2.0
+
+# Тесты
+pytest>=8.0
