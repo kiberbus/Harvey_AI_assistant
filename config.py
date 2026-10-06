@@ -133,6 +133,9 @@ SILERO_MODEL = "v5_ru"
 SILERO_SPEAKER = "xenia"         # женские: xenia, kseniya, baya; мужские: aidar, eugene
 SILERO_DEVICE = "cpu"            # cuda быстрее, но занимает видеопамять
 SILERO_SAMPLE_RATE = 24000       # 48000 чище, но чуть медленнее
+# Перевод вслух («как по-английски добрый вечер»): язык → (модель Silero, голос). Модель качается сама
+# при первом переводе. Голоса в v3_en подобраны по высоте тона: en_21 женский, en_80 мужской.
+SILERO_FOREIGN = {"английский": ("v3_en", "en_21" if FEMALE_VOICE else "en_80")}
 
 # Заметки, погода, курс, лог
 NOTES_FILE = BASE_DIR / "notes.txt"

@@ -13,6 +13,8 @@ def route(text: str):
     names = action.__code__.co_names
     if "ask_screen" in names:
         return "screen"
+    if "translate_aloud" in names:
+        return "translate"
     if "on_selection" in names:
         return "selection:" + action.__defaults__[0]
     if "wiki" in names:
@@ -29,8 +31,8 @@ def route(text: str):
     ("что такое это", "ask"),
     ("почему небо голубое", "ask"),
     ("объясни теорию относительности", "ask"),
-    ("переведи на английский как дела", "ask"),
-    ("как будет кошка по-английски", "ask"),
+    ("переведи на английский как дела", "translate"),
+    ("как будет кошка по-английски", "translate"),
     ("подробнее", "ask"),
     ("как дела", "ask"),
     ("алё", "ask"),
@@ -74,6 +76,33 @@ def test_route(phrase, expected):
 def test_commands_win_over_questions():
     """«Переведи компьютер в спящий режим» - команда, а не перевод: обычные команды проверяются раньше."""
     assert parse.parse_all("переведи компьютер в спящий режим") is not None
+
+
+@pytest.mark.parametrize("phrase,expected", [
+    ("как по-английски «добрый вечер»", ("добрый вечер", "английский")),
+    ("как по английски добрый вечер", ("добрый вечер", "английский")),     # Whisper без дефиса
+    ("как будет по-английски спасибо", ("спасибо", "английский")),
+    ("как по-английски будет кошка", ("кошка", "английский")),
+    ("как сказать я тебя люблю по-английски", ("я тебя люблю", "английский")),
+    ("а как по-немецки спасибо", ("спасибо", "немецкий")),
+    ("переведи спасибо на французский", ("спасибо", "французский")),
+    ("скажи по-английски доброе утро", ("доброе утро", "английский")),
+    ("как по-русски thank you", ("thank you", "русский")),
+    ("как по-человечески сказать что я занят", None),
+    ("переведи на английский", None),
+])
+def test_translate_request(phrase, expected):
+    assert smart.translate_request(phrase) == expected
+
+
+def test_translate_aloud_uses_language_voice(monkeypatch):
+    """Перевод звучит голосом своего языка, а в контекст попадает сам перевод."""
+    said = []
+    monkeypatch.setattr(smart, "warm_foreign", lambda lang: None)
+    monkeypatch.setattr(smart, "edit", lambda instruction, text: "«Good evening.»")
+    monkeypatch.setattr(smart, "speak_foreign", lambda text, lang: said.append((text, lang)))
+    assert smart.translate_aloud("добрый вечер", "английский") == (None, "Good evening.")
+    assert said == [("Good evening.", "английский")]
 
 
 def test_screen_off_without_vision(monkeypatch):

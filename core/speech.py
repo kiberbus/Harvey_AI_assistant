@@ -21,6 +21,7 @@ from config import (
     PIPER_VOICE,
     QUIET_MODE,
     SILERO_DEVICE,
+    SILERO_FOREIGN,
     SILERO_MODEL,
     SILERO_SAMPLE_RATE,
     SILERO_SPEAKER,
@@ -114,15 +115,15 @@ def _ensure_piper() -> None:
 _tts_gen = 0   # растёт при каждом прерывании: устаревшие фразы из очереди не произносятся
 
 
-def _silero_model_file() -> Path:
+def _silero_model_file(name: str = SILERO_MODEL) -> Path:
     """Модель лежит в папке silero. Качаю сам, а не через пакет silero: PyTorch на Windows
     не открывает пути с кириллицей."""
-    path = BASE_DIR / "silero" / f"{SILERO_MODEL}.pt"
+    path = BASE_DIR / "silero" / f"{name}.pt"
     if path.exists() and path.stat().st_size > 10_000_000:
         return path
     import urllib.request
 
-    url = f"https://models.silero.ai/models/tts/ru/{SILERO_MODEL}.pt"
+    url = f"https://models.silero.ai/models/tts/{name.rsplit('_', 1)[-1]}/{name}.pt"     # v3_en → en/v3_en.pt
     log("TTS", f"Скачиваю модель Silero: {url}")
     path.parent.mkdir(exist_ok=True)
     part = path.with_suffix(".part")
@@ -131,19 +132,51 @@ def _silero_model_file() -> Path:
     return path
 
 
-def _ensure_silero() -> None:
-    global _silero_model, _engine
+def _load_silero(name: str):
     import io
 
     import torch
     from torch.package import PackageImporter
 
     torch.set_num_threads(min(4, os.cpu_count() or 4))
-    data = _silero_model_file().read_bytes()                  # читаем средствами Python (юникод-пути работают)
+    data = _silero_model_file(name).read_bytes()              # читаем средствами Python (юникод-пути работают)
     model = PackageImporter(io.BytesIO(data)).load_pickle("tts_models", "model")
     model.to(torch.device(SILERO_DEVICE))
-    _silero_model, _engine = model, "silero"
+    return model
+
+
+def _ensure_silero() -> None:
+    global _silero_model, _engine
+    _silero_model, _engine = _load_silero(SILERO_MODEL), "silero"
     log("TTS", f"Silero готов (голос {SILERO_SPEAKER}, {SILERO_DEVICE}).")
+
+
+_foreign_models: dict[str, object] = {}     # язык → модель Silero; None - не загрузилась, читаю русским голосом
+_foreign_lock = threading.Lock()
+
+
+def has_foreign_voice(lang: str) -> bool:
+    return lang in SILERO_FOREIGN
+
+
+def _foreign_model(lang: str):
+    """Модель другого языка грузится при первом переводе: держать её в памяти постоянно незачем."""
+    with _foreign_lock:
+        if lang not in _foreign_models:
+            name = SILERO_FOREIGN[lang][0]
+            try:
+                _foreign_models[lang] = _load_silero(name)
+                log("TTS", f"Silero {name} готов ({lang}).")
+            except Exception as e:
+                _foreign_models[lang] = None
+                log("TTS", f"Silero {name} недоступен ({e}) - читаю русским голосом.")
+        return _foreign_models[lang]
+
+
+def warm_foreign(lang: str) -> None:
+    """Гружу модель в фоне, пока ИИ переводит: первый перевод не ждёт лишние секунды."""
+    if has_foreign_voice(lang):
+        threading.Thread(target=_foreign_model, args=(lang,), daemon=True).start()
 
 
 def _ensure_tts() -> None:
@@ -214,6 +247,19 @@ def _synthesize_silero(text: str) -> tuple[np.ndarray, int] | None:
                     last_error = e
             else:
                 raise last_error
+            pieces.append(audio.detach().cpu().numpy().astype("float32"))
+    return (np.concatenate(pieces), SILERO_SAMPLE_RATE) if pieces else None
+
+
+def _synthesize_foreign(lang: str, text: str) -> tuple[np.ndarray, int] | None:
+    """Перевод читает голос его языка: русская модель латиницу только транслитерирует."""
+    model = _foreign_model(lang)
+    if model is None:
+        return _synthesize(text)
+    pieces: list[np.ndarray] = []
+    with _piper_lock:
+        for chunk in _split_sentences(text):
+            audio = model.apply_tts(text=chunk, speaker=SILERO_FOREIGN[lang][1], sample_rate=SILERO_SAMPLE_RATE)
             pieces.append(audio.detach().cpu().numpy().astype("float32"))
     return (np.concatenate(pieces), SILERO_SAMPLE_RATE) if pieces else None
 
@@ -361,7 +407,7 @@ def _enqueue(kind: str, payload: str) -> None:
     global _inflight
     with _inflight_lock:
         _inflight += 1
-    if kind == "text":      # сигналы микрофон не «глушат»: их эхо отсеет VAD, а диалог не прервётся
+    if kind != "sound":     # сигналы микрофон не «глушат»: их эхо отсеет VAD, а диалог не прервётся
         _speaking.set()
     _tts_queue.put((kind, payload, _tts_gen))
 
@@ -388,6 +434,8 @@ def _synth_worker() -> None:
             try:
                 if kind == "sound":
                     audio = SOUNDS.get(payload)
+                elif kind != "text":
+                    audio = _synthesize_foreign(kind, payload)    # вид - язык перевода
                 elif _tts_ready():
                     audio = _synthesize(payload)
                 else:
@@ -443,6 +491,17 @@ def speak(text: str) -> None:
     if threading.current_thread() is threading.main_thread():
         _ducker.duck()                      # приглушаем музыку только когда реально говорим
     _enqueue("text", text)
+
+
+def speak_foreign(text: str, lang: str) -> None:
+    """Фраза на другом языке («Good evening») - голосом этого языка, если он есть в SILERO_FOREIGN."""
+    if not has_foreign_voice(lang):
+        speak(text)
+        return
+    print(f"\n{ASSISTANT_NAME}: {text}", flush=True)
+    if threading.current_thread() is threading.main_thread():
+        _ducker.duck()
+    _enqueue(lang, text)
 
 
 # Отдаю кусок ответа в озвучку на конце предложения или переводе строки

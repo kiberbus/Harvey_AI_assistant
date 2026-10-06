@@ -35,6 +35,7 @@ from phrases import (
     SELECTION_ACTIONS,
     SELECTION_THIS,
     SELECTION_WORDS,
+    TRANSLATE_ALOUD,
     TRANSLATE_LANGS,
     WIKI,
     WIKI_NOT_SUBJECT,
@@ -57,7 +58,9 @@ from core.apps import (  # noqa: F401
     last_dictation,
 )
 from core.speech import (  # noqa: F401
+    speak_foreign,
     speak_stream,
+    warm_foreign,
 )
 from core.winapi import (  # noqa: F401
     _user32,
@@ -93,6 +96,8 @@ SELECTION_THIS_RE = re.compile(SELECTION_THIS)
 SELECTION_ACTION_RES = tuple((name, re.compile(p)) for name, p in SELECTION_ACTIONS.items())
 STYLE_RES = tuple((re.compile(rf"\b(?:{p})"), instruction) for p, instruction in REWRITE_STYLES.items())
 LANG_RES = tuple((re.compile(rf"\b(?:{p})"), lang) for p, lang in TRANSLATE_LANGS.items())
+TRANSLATE_ALOUD_RES = tuple(re.compile(p) for p in TRANSLATE_ALOUD)
+_QUOTE_CHARS = "«»\"“”„'"
 # Что остаётся от "переведи на английский и вставь", если своего текста нет
 # ("ставь" - так Whisper слышит "вставь")
 _BARE_FILLER_RE = re.compile(
@@ -136,6 +141,9 @@ def parse(low: str) -> Callable[[list[dict]], Result] | None:
         if pointed or (action == "rewrite" and style) or (action != "rewrite" and _bare(low, verb)):
             return lambda history, a=action: on_selection(a, low, style)
         break
+    request = translate_request(low)
+    if request:
+        return lambda history: translate_aloud(*request)
     subject = wiki_subject(low)
     if subject:
         return lambda history: wiki(subject, low, history)
@@ -182,6 +190,31 @@ def edit(instruction: str, text: str) -> str:
 def _speak_answer(messages: list[dict], num_predict: int = 150, num_ctx: int | None = None) -> Result:
     said = speak_stream(_texts(messages, num_predict, num_ctx))
     return (None, said) if said else (f"{FAIL}не получилось ответить", "")
+
+
+def translate_request(low: str) -> tuple[str, str] | None:
+    """«Как по-английски „добрый вечер“» → ("добрый вечер", "английский"). Язык не из списка
+    («как по-человечески сказать») - не перевод."""
+    for rx in TRANSLATE_ALOUD_RES:
+        m = rx.match(low)
+        if not m:
+            continue
+        lang = next((name for lang_rx, name in LANG_RES if lang_rx.search(m.group("lang"))), None)
+        text = m.group("text").strip(PUNCT + _QUOTE_CHARS)
+        if lang and text:
+            return text, lang
+    return None
+
+
+def translate_aloud(text: str, lang: str) -> Result:
+    """Перевод произносит голос его языка («Good evening» - английской моделью Silero)."""
+    warm_foreign(lang)
+    result = edit(f"Переведи фразу на {lang} язык. Верни только перевод.", text).strip(_QUOTE_CHARS + " ")
+    if not result:
+        return f"{FAIL}не получилось перевести", ""
+    log("Перевод", f"{text} → {result}")
+    speak_foreign(result, lang)                  # нет голоса языка - скажет русский
+    return None, result
 
 
 def ask(question: str, history: list[dict]) -> Result:
