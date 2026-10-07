@@ -21,11 +21,13 @@ from config import (
     COMMAND_TIMEOUT,
     EARLY_MAX_SEC,
     EARLY_SILENCE,
+    MAX_LAG_SEC,
     MAX_UTTERANCE_SEC,
     MIN_UTTERANCE_SEC,
     PRE_BUFFER_SEC,
     SAMPLE_RATE,
     SILENCE_DURATION,
+    SLEEP_MAX_SEC,
     TAIL_KEEP_BLOCKS,
     VAD_ENABLED,
     VAD_THRESHOLD,
@@ -57,6 +59,9 @@ EARLY_MAX_BLOCKS = int(EARLY_MAX_SEC * SAMPLE_RATE / BLOCK_SIZE)
 MIN_SPEECH_BLOCKS = int(MIN_UTTERANCE_SEC * SAMPLE_RATE / BLOCK_SIZE)
 MAX_UTTERANCE_BLOCKS = int(MAX_UTTERANCE_SEC * SAMPLE_RATE / BLOCK_SIZE)
 COMMAND_WAIT_BLOCKS = int(COMMAND_TIMEOUT * SAMPLE_RATE / BLOCK_SIZE)
+MAX_LAG_BLOCKS = int(MAX_LAG_SEC * SAMPLE_RATE / BLOCK_SIZE)
+LAG_KEEP_BLOCKS = int(2.0 * SAMPLE_RATE / BLOCK_SIZE)     # сбросив отставание, последние 2 с оставляю: вдруг там начало фразы
+SLOW_STT_SEC = 2.0             # распознавание дольше этого - пишу в лог: видеокарта, скорее всего, занята
 
 
 _whisper_model = None
@@ -223,9 +228,43 @@ def transcribe(audio: np.ndarray) -> str:
     last = _last_heard
     if last is not None and len(last[0]) == len(audio) and np.array_equal(last[0], audio):
         return last[1]
+    started = time.time()
     text = _transcribe(audio)
+    _note_slow(time.time() - started, len(audio))
     _last_heard = (audio, text)
     return text
+
+
+_slow_logged_at = 0.0
+
+
+def _note_slow(took: float, samples: int) -> None:
+    """Обычно фраза распознаётся за 0.2-0.5 с. Намного дольше - видеокарту, скорее всего, заняла игра.
+    Пишу не чаще раза в 30 с, чтобы за вечер игры не забить лог."""
+    global _slow_logged_at
+    if took > SLOW_STT_SEC and time.time() - _slow_logged_at > 30:
+        _slow_logged_at = time.time()
+        log("STT", f"распознавание заняло {took:.1f} с на {samples / SAMPLE_RATE:.1f} с звука - видеокарта занята?")
+
+
+def drop_stale(q: queue.Queue, keep_blocks: int) -> int:
+    """Выбрасывает из очереди микрофона всё, кроме последних keep_blocks блоков. Сколько выбросил.
+    Звук копится, пока Харви распознаёт и выполняет; если она не успевает, лучше пропустить старое,
+    чем отвечать на то, что сказали полчаса назад."""
+    dropped = 0
+    while q.qsize() > keep_blocks:
+        try:
+            q.get_nowait()
+        except queue.Empty:
+            break
+        dropped += 1
+    return dropped
+
+
+def too_long_to_wake(audio: np.ndarray, heard_name: bool) -> bool:
+    """Во сне жду только «Харви, проснись» - фраза короткая. Длинный разговор рядом не распознаю
+    (если модель имени в нём не услышала): в игре каждая лишняя фраза стоила видеокарте ~20 с."""
+    return not heard_name and len(audio) > SLEEP_MAX_SEC * SAMPLE_RATE
 
 
 def _transcribe(audio: np.ndarray) -> str:

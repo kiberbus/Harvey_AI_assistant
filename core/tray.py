@@ -118,10 +118,12 @@ def start_tray() -> None:
 
     def go_sleep(_icon, _item) -> None:
         set_sleeping(True)
+        log("Трей", "сон")
         play_sound("cancel")
 
     def wake(_icon, _item) -> None:
-        set_sleeping(False)
+        set_sleeping(False)                   # накопленный во сне звук сбросит главный цикл
+        log("Трей", "проснуться")
         play_sound("ready")
 
     def toggle_autostart(_icon, item) -> None:

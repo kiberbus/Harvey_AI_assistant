@@ -264,6 +264,40 @@ def test_record_utterance_returns_early():
     assert 38 - q2.qsize() == 8 + stt.SILENCE_BLOCKS                # команда не законченная - ждём как раньше
 
 
+def test_drop_stale_keeps_only_fresh_audio():
+    """Из лога: в игре распознавание шло по ~20 с, звук копился, и Харви отставала на час."""
+    import queue
+
+    from core import stt
+    q = queue.Queue()
+    for i in range(500):                                       # 50 с звука
+        q.put(i)
+    assert stt.drop_stale(q, stt.LAG_KEEP_BLOCKS) == 500 - stt.LAG_KEEP_BLOCKS
+    assert [q.get_nowait() for _ in range(q.qsize())] == list(range(500 - stt.LAG_KEEP_BLOCKS, 500))
+    assert stt.MAX_LAG_BLOCKS > stt.LAG_KEEP_BLOCKS
+
+
+def test_sleep_ignores_long_talk_but_not_wake_phrase():
+    import numpy as np
+
+    from core import stt
+    second = np.zeros(stt.SAMPLE_RATE, dtype=np.float32)
+    assert not stt.too_long_to_wake(np.tile(second, 2), heard_name=False)      # «Харви, проснись»
+    assert stt.too_long_to_wake(np.tile(second, 10), heard_name=False)        # разговор в Discord
+    assert not stt.too_long_to_wake(np.tile(second, 10), heard_name=True)     # модель услышала имя
+
+
+def test_slow_transcription_is_logged_rarely(monkeypatch):
+    from core import stt
+    logged = []
+    monkeypatch.setattr(stt, "log", lambda tag, text: logged.append(text))
+    monkeypatch.setattr(stt, "_slow_logged_at", 0.0)
+    stt._note_slow(0.3, stt.SAMPLE_RATE)                      # обычная скорость - молчу
+    stt._note_slow(20.0, 5 * stt.SAMPLE_RATE)
+    stt._note_slow(20.0, 5 * stt.SAMPLE_RATE)                 # через секунду - не повторяю
+    assert len(logged) == 1 and "20.0 с" in logged[0]
+
+
 def test_wake_model_decides_only_with_gate(monkeypatch):
     """В режиме наблюдения промах модели имени не отбрасывает фразу и не отключает досрочное распознавание."""
     from core import stt

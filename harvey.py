@@ -76,6 +76,8 @@ from core.daily import (  # noqa: F401
 )
 from core.stt import (  # noqa: F401
     collect_name_sample,
+    LAG_KEEP_BLOCKS,
+    MAX_LAG_BLOCKS,
     PRE_BUFFER_BLOCKS,
     _get_block,
     _load_whisper,
@@ -85,9 +87,11 @@ from core.stt import (  # noqa: F401
     _whisper_ready,
     calibrate_silence,
     drain,
+    drop_stale,
     is_noise,
     record_command,
     record_utterance,
+    too_long_to_wake,
     transcribe,
 )
 from core.tray import (  # noqa: F401
@@ -174,6 +178,7 @@ def main() -> None:
     pre_buffer: deque = deque(maxlen=PRE_BUFFER_BLOCKS)
     ducker = _ducker
     dialog_until = 0.0                       # до какого момента слушаем без «Харви» (0 - окно закрыто)
+    was_sleeping = daily._sleeping
 
     def audio_callback(indata, frames, time_info, status):
         audio_q.put(indata.copy())          # слушаю всегда, чтобы Харви можно было перебить
@@ -200,6 +205,17 @@ def main() -> None:
                     elif time.time() > dialog_until:
                         dialog_until = 0.0
                         log("Диалог", "окно закрыто")
+                # Разбудили (голосом или из трея) - звук, накопленный во сне, уже не нужен
+                if was_sleeping and not daily._sleeping:
+                    drain(audio_q)
+                    pre_buffer.clear()
+                    log("Система", "проснулась, слушаю")
+                was_sleeping = daily._sleeping
+                # Не успеваю за микрофоном (игра заняла видеокарту) - старое выбрасываю, иначе отстаю на час
+                if audio_q.qsize() > MAX_LAG_BLOCKS:
+                    dropped = drop_stale(audio_q, LAG_KEEP_BLOCKS)
+                    pre_buffer.clear()
+                    log("Система", f"не успеваю распознавать - пропустила {dropped * BLOCK_SIZE / SAMPLE_RATE:.0f} с звука")
                 try:
                     block = _get_block(audio_q, timeout=0.1)
                 except queue.Empty:
@@ -231,6 +247,8 @@ def main() -> None:
                 pre_buffer.clear()
                 heard_name = _wake.take()
                 if audio is None:
+                    continue
+                if daily._sleeping and too_long_to_wake(audio, heard_name):
                     continue
                 # С детектором имени Whisper нужен только в диалоге, при да/нет
                 # и чтобы услышать "стоп", пока Харви говорит
