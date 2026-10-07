@@ -89,18 +89,35 @@ def test_undo_kind_without_actions():
     assert undo.undo("brightness").startswith(undo.INFO)
 
 
+DOWNLOADS = r"C:\Users\x\Downloads"
+
+
 @pytest.mark.parametrize("result,reopened", [
     ("закрыл вкладку «YouTube»", ("key", "reopen_tab")),
-    ("закрыл папку загрузки", ("folder", "загрузки")),
+    ("закрыл папку загрузки", ("folder", [DOWNLOADS])),     # по пути: «загрузки» - не ключ FOLDERS
+    ("закрыл проводник", ("folder", [DOWNLOADS])),
     ("закрыл telegram", ("app", "telegram")),
 ])
 def test_reopen_closed(monkeypatch, keys, result, reopened):
+    from core import files
     done = []
-    monkeypatch.setattr(apps, "open_folder", lambda name: done.append(("folder", name)) or "ok")
+    monkeypatch.setattr(files, "last_closed", [DOWNLOADS])
+    monkeypatch.setattr(files, "reopen", lambda paths: done.append(("folder", paths)) or "ok")
     monkeypatch.setattr(apps, "open_app", lambda name: done.append(("app", name)) or "ok")
-    undo.after("close_app", {"name": reopened[1] if reopened[0] != "key" else "ютуб"}, None, result)
+    name = {"key": "ютуб", "folder": "загрузки"}.get(reopened[0], reopened[1])
+    undo.after("close_app", {"name": name}, None, result)
     undo.undo("close")
     assert (done or [("key", keys[0])]) == [reopened]
+
+
+def test_deleted_file_comes_back_from_recycle_bin(monkeypatch):
+    """«Удали файл отчёт» - «да» - «отмени»: файл возвращается из корзины."""
+    from core import files
+    restored = []
+    monkeypatch.setattr(files, "restore", lambda paths: restored.append(paths) or "вернула")
+    undo.after("recycle", {"paths": [r"C:\x\отчёт.txt"]}, None, "удалила в корзину «отчёт»")
+    assert undo.undo() == "вернула" and restored == [[r"C:\x\отчёт.txt"]]
+    assert undo.undo("delete").startswith(undo.INFO)        # больше ничего не удаляла
 
 
 def test_pasted_text_undone_in_same_window(monkeypatch, keys):

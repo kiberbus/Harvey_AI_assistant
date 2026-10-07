@@ -31,12 +31,29 @@ from phrases import (
     CLICK_NOT_NAME,
     CURRENCY_WORDS,
     DRIVE_LETTERS,
+    FILE_CREATE,
+    FILE_DELETE,
+    FILE_NAME_LEAD,
+    FILE_NOUNS,
+    FILE_OPEN,
+    FILE_SELECT,
+    FILE_TYPES,
     FOLDER_ALIASES,
+    FOLDER_CLOSE_NAMED,
+    FOLDER_CREATE,
+    FOLDER_OPEN,
+    FOLDER_PLACE_PREP,
+    FOLDER_PLACES,
     FORWARD_OR_NEXT,
     GAME_LAUNCH,
     GOOGLE,
     HEARING_FIXES,
+    KEY_NAMES,
     MUSIC_APP,
+    PRESS,
+    PRESS_NEXT,
+    PRESS_SKIP,
+    PRESS_TIMES,
     SCENE_VERBS,
     SIDE_BY_SIDE,
     TAB_CLOSE_NAMED,
@@ -98,7 +115,7 @@ from core.apps import (  # noqa: F401
 from core.daily import (  # noqa: F401
     parse_duration,
 )
-from core import browser, calc, steam, system  # noqa: F401
+from core import browser, calc, files, steam, system  # noqa: F401
 from core import tools
 from core.audio import (  # noqa: F401
     device_alias,
@@ -196,6 +213,158 @@ def _whole_click(low: str) -> Callable[[], str] | None:
     return None
 
 
+PRESS_RE = re.compile(PRESS)
+PRESS_TIMES_RE = re.compile(PRESS_TIMES)
+PRESS_TIMES_BEFORE_RE = re.compile("^" + PRESS_TIMES.removeprefix(r"\s+").removesuffix("$") + r"\s+")
+PRESS_SKIP_RE = re.compile(PRESS_SKIP)
+PRESS_NEXT_RE = re.compile(PRESS_NEXT)
+_KEY_END = r"(?=[\s,+-]|$)"
+_KEY_RES = [(key, re.compile(rf"(?:{p}){_KEY_END}")) for key, p in KEY_NAMES.items()]
+_KEY_GENERIC_RE = re.compile(rf"(?:(?:f|ф|эф)\s?-?(?P<f>2[0-4]|1\d|[1-9])|(?P<ch>[a-z0-9])){_KEY_END}")
+
+
+def _key_at(text: str, pos: int) -> tuple[str | None, int]:
+    """Самое длинное название клавиши с позиции pos: «page down» раньше «down», «f5» раньше «f»."""
+    best, end = None, pos
+    for key, rx in _KEY_RES:
+        m = rx.match(text, pos)
+        if m and m.end() > end:
+            best, end = key, m.end()
+    m = _KEY_GENERIC_RE.match(text, pos)
+    if m and m.end() > end:
+        best, end = (f"f{m.group('f')}" if m.group("f") else m.group("ch")), m.end()
+    return best, end
+
+
+def parse_keys(seg: str) -> Callable[[], str] | None:
+    """«Нажми ctrl g», «нажми W и D», «нажми alt f4», «нажми enter три раза». Клавиши одного сочетания
+    нажимаю вместе; модификатор после обычной клавиши или «потом» начинают следующее сочетание:
+    «нажми ctrl c ctrl v». None - в фразе есть не только клавиши («нажми подписаться» - кнопка на экране)."""
+    seg = seg.strip(PUNCT)
+    before = PRESS_TIMES_BEFORE_RE.match(seg)             # «три раза нажми пробел» - из лога
+    m = PRESS_RE.match(seg[before.end():] if before else seg)
+    if not m:
+        return None
+    text = m.group("keys")
+    t = before or PRESS_TIMES_RE.search(text)
+    if t is not None and t is not before:
+        text = text[:t.start()]
+    times = ({"дважды": 2, "трижды": 3}.get(t.group("w") or "") or parse_number(t.group("n")) or 1) if t else 1
+    chords: list[list[str]] = [[]]
+    pos = 0
+    while pos < len(text):
+        skip = PRESS_SKIP_RE.match(text, pos)
+        if skip and skip.end() > pos:
+            pos = skip.end()
+            continue
+        then = PRESS_NEXT_RE.match(text, pos)
+        if then:
+            chords.append([])
+            pos = then.end()
+            continue
+        key, end = _key_at(text, pos)
+        if key is None:
+            return None
+        chord = chords[-1]
+        if key in chord or (key in system.MODIFIERS and chord and chord[-1] not in system.MODIFIERS):
+            chord = []
+            chords.append(chord)
+        chord.append(key)
+        pos = end
+    keys = ", ".join("+".join(chord) for chord in chords if chord)
+    if not keys:
+        return None
+    args = {"keys": keys, **({"times": times} if times > 1 else {})}
+    return lambda: tools.execute_tool("press_keys", args)
+
+
+FILE_CREATE_RE = re.compile(FILE_CREATE)
+FOLDER_CREATE_RE = re.compile(FOLDER_CREATE)
+FILE_NAME_LEAD_RE = re.compile(FILE_NAME_LEAD)
+FILE_OPEN_RE = re.compile(FILE_OPEN)
+FOLDER_OPEN_RE = re.compile(FOLDER_OPEN)
+FILE_DELETE_RE = re.compile(FILE_DELETE)
+FILE_SELECT_RE = re.compile(FILE_SELECT)
+FOLDER_CLOSE_NAMED_RE = re.compile(FOLDER_CLOSE_NAMED)
+_FILE_TYPE_RES = [(ext, re.compile(rf"(?:{p})$")) for ext, p in FILE_TYPES.items()]
+_FILE_NOUN_RES = [(re.compile(rf"(?:{p})$"), ext) for p, ext in FILE_NOUNS.items()]
+_PLACE_RES = [(key, re.compile(rf"(?:^|\s){FOLDER_PLACE_PREP}(?:{p})(?=\s|$)")) for key, p in FOLDER_PLACES.items()]
+
+
+def _cut_place(text: str) -> tuple[str, str]:
+    """«отчёт на рабочем столе» → («отчёт», "desktop"); места нет - (text, "")."""
+    for key, rx in _PLACE_RES:
+        m = rx.search(text)
+        if m:
+            return (text[:m.start()] + " " + text[m.end():]).strip(), key
+    return text, ""
+
+
+def _file_name(text: str) -> str | None:
+    """Название без «с названием», «и назови его» и знаков по краям. None - за ним ещё команда
+    («создай файл и открой его» разберётся по частям)."""
+    name = FILE_NAME_LEAD_RE.sub("", text, count=1).strip(PUNCT + "«»\"'")
+    return None if SPLIT_RE.search(f" {name} ") else name
+
+
+def _file_args(text: str, **extra) -> dict | None:
+    rest, where = _cut_place(text)
+    name = _file_name(rest)
+    if name is None:
+        return None
+    return {**({"name": name} if name else {}), **({"where": where} if where else {}), **extra}
+
+
+def _ext_of(m: re.Match) -> str:
+    for word in (m.group("type"), m.group("type2")):
+        ext = next((ext for ext, rx in _FILE_TYPE_RES if word and rx.match(word)), None)
+        if ext:
+            return ext
+    return next((ext for rx, ext in _FILE_NOUN_RES if rx.match(m.group("noun"))), "") or "txt"
+
+
+def parse_files(seg: str) -> Callable[[], str] | None:
+    """Файлы и папки в проводнике (core/files.py): выделить, удалить, создать, открыть, закрыть окна папок.
+    Раньше клавиш: «выдели всё» в папке - файлы, а не Ctrl+A в адресной строке; «удали всё» - не очистка поля."""
+    seg = seg.strip(PUNCT)
+    simple = (("select_files", "select_all", {"folder": True}), ("select_all", "select_all", {}),
+              ("delete_everything", "delete_selected", {"everything": True}), ("delete_selected", "delete_selected", {}),
+              ("folders_close_all", "close_folder", {"everything": True}), ("folder_close", "close_folder", {}))
+    for key, tool, args in simple:
+        if R[key].search(seg):
+            return lambda t=tool, a=args: tools.execute_tool(t, a)
+    if R["file_open_last"].search(seg) and files.recent_created():
+        return lambda: tools.execute_tool("open_file", {})
+    if R["recent_file"].search(seg) or R["recent_list"].search(seg):
+        return None                  # «открой файл, который я недавно редактировал» - недавние файлы
+    m = FILE_CREATE_RE.match(seg)
+    args = _file_args(m.group("rest"), ext=_ext_of(m)) if m else None
+    if not m:
+        m = FOLDER_CREATE_RE.match(seg)
+        args = _file_args(m.group("rest"), ext="") if m else None
+    if m:
+        return (lambda: tools.execute_tool("create_file", args)) if args is not None else None
+    for rx, tool in ((FILE_OPEN_RE, "open_file"), (FILE_DELETE_RE, "delete_file"), (FILE_SELECT_RE, "select_file")):
+        m = rx.match(seg)
+        if m:
+            args = _file_args(m.group("name"), **({"folder": True} if m.group("kind") == "папку" else {}))
+            if not args or "name" not in args:
+                return None
+            return lambda t=tool: tools.execute_tool(t, args)
+    m = FOLDER_OPEN_RE.match(seg)
+    if m:
+        name = m.group("name").strip(PUNCT)
+        if name in FOLDER_ALIASES:                          # «зайди в папку загрузки»
+            return lambda: tools.execute_tool("open_folder", {"name": FOLDER_ALIASES[name]})
+        args = _file_args(name, folder=True)
+        return (lambda: tools.execute_tool("open_file", args)) if args and "name" in args else None
+    m = FOLDER_CLOSE_NAMED_RE.match(seg)
+    if m:
+        name = _file_name(m.group("name"))
+        return (lambda: tools.execute_tool("close_folder", {"name": name})) if name else None
+    return None
+
+
 def parse_local(segment: str) -> Callable[[], str] | None:
     """Разбирает одну простую команду. None - нужен ИИ."""
     seg = segment.strip(PUNCT)
@@ -236,7 +405,7 @@ def parse_local(segment: str) -> Callable[[], str] | None:
 
     # Отмена раньше клавиш и «открой X»: «отмени» - не всегда Ctrl+Z, «открой обратно» - не приложение
     for key, kind in (("undo_volume", "volume"), ("undo_brightness", "brightness"), ("undo_close", "close"),
-                      ("undo_text", "text")):
+                      ("undo_text", "text"), ("undo_delete", "delete")):
         if R[key].search(seg):
             return lambda k=kind: tools.execute_tool("undo", {"kind": k})
     if R["undo_last"].search(seg):
@@ -247,10 +416,20 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if tab_action:
         return tab_action
 
+    # Файлы и папки - раньше клавиш: «выдели всё» в проводнике выделяет файлы, «удали всё» - не очистка поля
+    file_action = parse_files(seg)
+    if file_action:
+        return file_action
+
     # Клавиши. Должны идти раньше "закрой X", медиа и "открой X"
     for action, rx in SHORTCUT_RES:
         if rx.search(seg):
             return lambda a=action: tools.execute_tool("shortcut", {"action": a})
+
+    # Любые клавиши: «нажми ctrl g», «нажми w и d». Раньше «нажми подписаться»: там не только клавиши
+    keys_action = parse_keys(seg)
+    if keys_action:
+        return keys_action
 
     # «Нажми подписаться» - надпись на экране. После клавиш («нажми enter») и лайка, раньше медиа и «открой X»:
     # они сработают, только если на экране такого нет
@@ -282,6 +461,10 @@ def parse_local(segment: str) -> Callable[[], str] | None:
         return lambda: tools.execute_tool("open_recent", {"show_all": True})
     if R["recent_file"].search(seg):
         return lambda: tools.execute_tool("open_recent", {})
+
+    # Все программы разом - после «да». Раньше обычного «закрой X»
+    if R["close_all_apps"].search(seg):
+        return lambda: tools.execute_tool("request_close_all", {})
 
     # Закрыть активное окно - раньше обычного "закрой X"
     if ACTIVE_CLOSE_RE.match(seg):
@@ -989,7 +1172,7 @@ def fix_hearing(low: str) -> str:
 _QUICK_KEYS = ("time", "date", "weekday", "datefull", "sleep_mode", "now_playing", "mute", "unmute",
                "media_next", "media_prev", "media_pause", "media_play",
                "track_like", "track_unlike", "track_dislike", "volume_up", "volume_down", "bright_up", "bright_down",
-               "tab_close", "tab_close_prev", "tab_close_next", "tab_list")
+               "tab_close", "tab_close_prev", "tab_close_next", "tab_list", "select_all", "select_files")
 
 
 def is_quick_command(text: str, need_name: bool = True, pending: bool = False) -> bool:
@@ -1046,6 +1229,12 @@ def parse_all(low: str, scenes: bool = True) -> list[Callable[[], str]] | None:
         return [tab_action]
     if any(rx.search(low) for _, rx in SHORTCUT_RES):
         return [parse_local(low)]                       # «назад в браузере», «следующая вкладка»
+    keys = parse_keys(low)                              # «нажми ctrl и g» - одно сочетание, не две команды
+    if keys:
+        return [keys]
+    file_action = parse_files(low)                      # «создай файл и назови его отчёт», «найди файл main» - не поиск
+    if file_action:
+        return [file_action]
     click = _whole_click(low)                           # «нажми принять и продолжить» - одна кнопка; после клавиш
     if click:
         return [click]
@@ -1063,15 +1252,19 @@ def parse_all(low: str, scenes: bool = True) -> list[Callable[[], str]] | None:
             return [whole]
     actions: list[Callable[[], str]] = []
     last_verb = last_target = ""
+    created = False
     for segment in SPLIT_RE.split(low):
         segment = segment.strip(PUNCT)
         if not segment:
             continue
         pronoun = PRONOUN_RE.match(segment)             # «открой телеграм, а потом закрой его»
-        if pronoun and last_target:
-            segment = f"{pronoun.group(1)} {last_target}"
         action = None
-        if last_verb in CLOSE_VERBS and _bare_name(segment):   # «закрой браузер и яндекс музыку» - закрыть обе
+        if pronoun and created and pronoun.group(1) in ("открой", "запусти"):   # «создай файл и открой его»
+            action = lambda: tools.execute_tool("open_file", {})
+        elif pronoun and last_target:
+            segment = f"{pronoun.group(1)} {last_target}"
+        created = bool(FILE_CREATE_RE.match(segment) or FOLDER_CREATE_RE.match(segment))
+        if not action and last_verb in CLOSE_VERBS and _bare_name(segment):   # «закрой браузер и яндекс музыку»
             action = parse_local(f"{last_verb} {segment}")
         action = action or parse_local(segment)
         if action is None and last_verb:                # «открой телеграм и браузер» → «открой браузер»

@@ -44,7 +44,7 @@ _lock = threading.Lock()
 # Клавиши, после которых Ctrl+Z в том же окне возвращает текст
 TEXT_SHORTCUTS = {"paste", "cut", "clear_field"}
 NOTHING = {"volume": f"громкость я недавно не менял{END}", "brightness": f"яркость я недавно не менял{END}",
-           "close": f"я недавно ничего не закрывал{END}"}
+           "close": f"я недавно ничего не закрывал{END}", "delete": f"я недавно ничего не удалял{END}"}
 
 
 def push(kind: str, what: str, revert: Callable[[], str]) -> None:
@@ -123,6 +123,12 @@ def _revert_for(name: str, args: dict, state, result: str) -> tuple[str, Callabl
         return "brightness", lambda: _restore_brightness(int(state))
     if name == "close_app":
         return "close", _reopen_closed(args.get("name", ""), result)
+    if name == "close_folder":
+        return "close", _reopen_folders()
+    if name == "recycle":                          # удалённое Харви - из корзины обратно
+        from core import files
+        paths = list(args.get("paths") or [])
+        return "delete", lambda: files.restore(paths)
     if name == "close_active" and state is not None:
         return "close", lambda: _reopen_window(state)
     if name == "shortcut" and args.get("action") == "close_tab":
@@ -157,11 +163,18 @@ def _reopen_closed(name: str, result: str) -> Callable[[], str]:
     from core import apps
     if "вкладк" in result:
         return _reopen_tab
-    if "папку" in result:
-        return lambda: apps.open_folder(name)
+    if "папку" in result or "проводник" in result:
+        return _reopen_folders()
     if name.strip().lower() in ("браузер", "browser"):
         return lambda: apps.open_browser()
     return lambda: apps.open_app(name)
+
+
+def _reopen_folders() -> Callable[[], str]:
+    """Папки открываю по путям, которые запомнил files: «загрузки» - не ключ FOLDERS, open_folder её не знает."""
+    from core import files
+    paths = list(files.last_closed)
+    return lambda: files.reopen(paths)
 
 
 def _active_window_info() -> dict | None:

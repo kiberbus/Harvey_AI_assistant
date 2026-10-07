@@ -33,6 +33,8 @@ from core.apps import (  # noqa: F401
     open_browser,
     open_folder,
     open_recent,
+    close_all_apps,
+    request_close_all,
     restore_windows,
     screenshot,
     set_brightness,
@@ -70,7 +72,7 @@ from core.daily import (  # noqa: F401
 from core.tray import (  # noqa: F401
     restart_self,
 )
-from core import browser, calc, game, steam, system, uia, undo
+from core import browser, calc, files, game, steam, system, uia, undo
 from core import gcal
 
 
@@ -128,6 +130,17 @@ FUNCTIONS: dict[str, Callable[..., str]] = {
     "change_brightness": change_brightness,
     "shortcut": system.shortcut,
     "click": uia.click,
+    "press_keys": system.press_keys,
+    "create_file": files.create_file,
+    "open_file": files.open_file,
+    "select_all": files.select_all,
+    "select_file": files.select_file,
+    "delete_file": files.delete_file,
+    "delete_selected": files.delete_selected,
+    "recycle": files.recycle,                          # только после «да», ИИ его не видит
+    "close_folder": files.close_folder,
+    "request_close_all": request_close_all,
+    "close_all_apps": close_all_apps,                  # только после «да», ИИ его не видит
     "open_drive": system.open_drive,
     "system_status": system.system_status,
     "gpu_status": system.gpu_status,
@@ -160,6 +173,7 @@ def _tool(name: str, description: str, properties: dict, required: list[str]) ->
 _PERCENT = {"type": "integer", "description": "Значение 0-100"}
 _DELTA = {"type": "integer", "description": "Изменение: положительное — больше, отрицательное — меньше"}
 _DAY = {"type": "string", "description": "Дата ГГГГ-ММ-ДД (сегодняшняя дата есть в системной подсказке)"}
+_WHERE = {"type": "string", "enum": list(FOLDERS), "description": "Только если папку назвали: «на рабочем столе»"}
 
 TOOLS = [
     _tool("open_app", "Открыть установленное приложение.",
@@ -222,9 +236,29 @@ TOOLS = [
           {"action": {"type": "string", "enum": list(system.SHORTCUT_KEYS)}}, ["action"]),
     _tool("click", "Нажать то, что видно в активном окне: кнопку, ссылку, пункт меню или вкладку - по надписи на ней.",
           {"name": {"type": "string", "description": "Надпись, как её сказали: «подписаться», «войти»"}}, ["name"]),
+    _tool("press_keys", "Нажать любые клавиши в активном окне: «ctrl+g», «alt+f4», «w+d»; несколько сочетаний "
+                        "по очереди - через запятую: «ctrl+c, ctrl+v».",
+          {"keys": {"type": "string"}, "times": {"type": "integer", "description": "Сколько раз, если просили"}},
+          ["keys"]),
+    _tool("create_file", "Создать файл или папку в открытой папке проводника (или в where).",
+          {"ext": {"type": "string", "description": "Расширение: txt, py, docx, xlsx, pptx, md…; пустое - папка"},
+           "name": {"type": "string", "description": "Название, если его сказали"}, "where": _WHERE}, ["ext"]),
+    _tool("open_file", "Открыть файл или папку по названию в открытой папке проводника (или в where).",
+          {"name": {"type": "string"}, "where": _WHERE, "folder": {"type": "boolean"}}, ["name"]),
+    _tool("select_file", "Выделить и показать файл в папке по названию.",
+          {"name": {"type": "string"}, "where": _WHERE, "folder": {"type": "boolean"}}, ["name"]),
+    _tool("select_all", "Выделить всё: в проводнике - все файлы папки, иначе Ctrl+A. folder=true - именно файлы папки.",
+          {"folder": {"type": "boolean"}}, []),
+    _tool("delete_file", "Удалить файл или папку по названию в корзину (спросит подтверждение).",
+          {"name": {"type": "string"}, "where": _WHERE, "folder": {"type": "boolean"}}, ["name"]),
+    _tool("delete_selected", "Удалить выделенное: в проводнике - файлы в корзину (спросит подтверждение), "
+                             "в других окнах - клавиша Delete.", {"everything": {"type": "boolean"}}, []),
+    _tool("close_folder", "Закрыть окно папки (проводника): текущее, по названию или все (everything).",
+          {"name": {"type": "string"}, "everything": {"type": "boolean"}}, []),
     _tool("undo", "Отменить последнее действие ассистента: вернуть громкость или яркость, открыть заново "
-                  "закрытое окно, убрать вставленный текст. Без kind - самое последнее, иначе Ctrl+Z.",
-          {"kind": {"type": "string", "enum": ["volume", "brightness", "close", "text"]}}, []),
+                  "закрытое окно, убрать вставленный текст, вернуть удалённое из корзины. "
+                  "Без kind - самое последнее, иначе Ctrl+Z.",
+          {"kind": {"type": "string", "enum": ["volume", "brightness", "close", "text", "delete"]}}, []),
     _tool("system_status", "Загрузка процессора и оперативной памяти.", {}, []),
     _tool("gpu_status", "Температура и загрузка видеокарты.", {}, []),
     _tool("microphone", "Включить (true) или выключить (false) микрофон.", {"state": {"type": "boolean"}}, ["state"]),

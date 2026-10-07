@@ -492,9 +492,15 @@ def test_collect_saves_without_whisper(monkeypatch, tmp_path):
 # закрытие папок и вкладок
 
 def test_folder_and_site_names():
-    from core import apps
-    assert apps._folder_names("загрузки") == {"загрузки", "downloads"}
-    assert apps._folder_names("телеграм") is None
+    """Окно папки узнаю по пути и названию вкладки: в Windows 11 заголовок окна - «Загрузки — проводник»."""
+    from core import apps, files
+    downloads = files._Tab(None, 1, r"C:\Users\x\Downloads", "Загрузки")
+    assert files._is_folder(downloads, "загрузки") and files._is_folder(downloads, "downloads")
+    assert not files._is_folder(downloads, "телеграм")
+    assert files._is_folder(files._Tab(None, 2, "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}", "Этот компьютер"),
+                            "этот компьютер")
+    assert files._is_folder(files._Tab(None, 3, r"C:\Слуга\Харви Тест", "Харви Тест"), "харви тест")
+    assert files._folder_key("телеграм") is None
     assert apps._site_keywords("ютуб") == {"ютуб", "youtube"}
     assert apps._site_keywords("телеграм") == set()
 

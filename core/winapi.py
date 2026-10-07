@@ -408,6 +408,40 @@ def _windows_of(pids: set[int]) -> list[tuple[int, bool]]:
     return sorted(found, key=lambda w: not w[1])
 
 
+def _top_windows() -> list[tuple[int, str, str, int]]:
+    """(hwnd, заголовок, класс, pid) видимых окон верхнего уровня - сверху вниз, как они лежат на экране."""
+    found: list[tuple[int, str, str, int]] = []
+    title, cls = ctypes.create_unicode_buffer(512), ctypes.create_unicode_buffer(128)
+
+    def callback(hwnd, _lparam):
+        if _user32.IsWindowVisible(hwnd) and _user32.GetWindowTextW(hwnd, title, 512):
+            _user32.GetClassNameW(hwnd, cls, 128)
+            pid = wintypes.DWORD()
+            _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            found.append((hwnd, title.value, cls.value, pid.value))
+        return True
+
+    _user32.EnumWindows(WNDENUMPROC(callback), 0)
+    return found
+
+
+def window_class(hwnd: int) -> str:
+    """Класс окна: CabinetWClass - проводник, Progman и WorkerW - рабочий стол."""
+    cls = ctypes.create_unicode_buffer(128)
+    _user32.GetClassNameW(hwnd, cls, 128)
+    return cls.value
+
+
+DWMWA_CLOAKED = 14
+
+
+def is_cloaked(hwnd: int) -> bool:
+    """Окно «спрятано» системой: приложения из Store в фоне числятся видимыми, но на экране их нет."""
+    cloaked = wintypes.DWORD()
+    _dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, ctypes.byref(cloaked), ctypes.sizeof(cloaked))
+    return bool(cloaked.value)
+
+
 def _force_foreground(hwnd: int) -> None:
     """Windows не даёт фоновой программе забирать фокус, поэтому делаю это в два шага."""
     fg = _user32.GetForegroundWindow()

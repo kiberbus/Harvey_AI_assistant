@@ -208,7 +208,7 @@ PHRASE_CASES = [
     ("верни звук", [("mute", {"state": False})]),
     ("верни закрытую вкладку", [("shortcut", {"action": "reopen_tab"})]),
     ("сохрани", [("shortcut", {"action": "save"})]),
-    ("выдели всё", [("shortcut", {"action": "select_all"})]),
+    ("выдели всё", [("select_all", {})]),                 # в проводнике - файлы, в остальных окнах - Ctrl+A
     ("очисти поле", [("shortcut", {"action": "clear_field"})]),
     ("нажми enter", [("shortcut", {"action": "enter"})]),
     ("нажми энтер", [("shortcut", {"action": "enter"})]),
@@ -343,6 +343,75 @@ PHRASE_CASES = [
     ("нажми плей", [(M, {"action": "play"})]),
     ("нажми play", [(M, {"action": "play"})]),
     ("нажми лайк", [("rate_track", {"action": "like"})]),
+    ("нажми таблицу", [("click", {"name": "таблицу"})]),                 # не клавиша Tab
+
+    # любые клавиши: «и» не делит сочетание на две команды
+    ("нажми ctrl g", [("press_keys", {"keys": "ctrl+g"})]),
+    ("нажми ctrl и g", [("press_keys", {"keys": "ctrl+g"})]),
+    ("нажми контрол и джи", [("press_keys", {"keys": "ctrl+g"})]),
+    ("нажми ctrl+shift+t", [("press_keys", {"keys": "ctrl+shift+t"})]),
+    ("нажми w и d", [("press_keys", {"keys": "w+d"})]),
+    ("нажми дабл ю", [("press_keys", {"keys": "w"})]),
+    ("нажми alt f4", [("press_keys", {"keys": "alt+f4"})]),
+    ("нажми клавишу f5", [("press_keys", {"keys": "f5"})]),
+    ("нажми win d", [("press_keys", {"keys": "win+d"})]),
+    ("нажми шифт таб", [("press_keys", {"keys": "shift+tab"})]),
+    ("нажми ctrl c ctrl v", [("press_keys", {"keys": "ctrl+c, ctrl+v"})]),
+    ("нажми ctrl a потом delete", [("press_keys", {"keys": "ctrl+a, delete"})]),
+    ("нажми enter три раза", [("press_keys", {"keys": "enter", "times": 3})]),
+    ("нажми стрелку вниз два раза", [("press_keys", {"keys": "down", "times": 2})]),
+    ("три раза нажми пробел", [("press_keys", {"keys": "space", "times": 3})]),   # из лога
+    ("дважды нажми enter", [("press_keys", {"keys": "enter", "times": 2})]),
+    ("нажми бэк спейс", [("press_keys", {"keys": "backspace"})]),
+    ("нажмите backspace", [("shortcut", {"action": "backspace"})]),       # из лога
+    ("нажми delete", [("shortcut", {"action": "delete"})]),
+    ("сотри", [("shortcut", {"action": "backspace"})]),                   # из лога: после «выдели всё»
+
+    # файлы и папки в проводнике
+    ("выдели все файлы", [("select_all", {"folder": True})]),
+    ("выдели всё в папке", [("select_all", {"folder": True})]),
+    ("видели все", [("select_all", {})]),
+    ("удали", [("delete_selected", {})]),                                 # из лога
+    ("удали выделенное", [("delete_selected", {})]),                      # из лога
+    ("удалите выделенные файлы", [("delete_selected", {})]),
+    ("удали всё", [("delete_selected", {"everything": True})]),
+    ("создай текстовый файл", [("create_file", {"ext": "txt"})]),
+    ("создай python-файл", [("create_file", {"ext": "py"})]),
+    ("создай питон файл main", [("create_file", {"ext": "py", "name": "main"})]),
+    ("создай файл питон с названием бот", [("create_file", {"ext": "py", "name": "бот"})]),
+    ("создай файл с названием список покупок", [("create_file", {"ext": "txt", "name": "список покупок"})]),
+    ("создай новый текстовый документ на рабочем столе", [("create_file", {"ext": "txt", "where": "desktop"})]),
+    ("создай файл main.py", [("create_file", {"ext": "txt", "name": "main.py"})]),   # расширение из названия - в files
+    ("создай ворд документ отчёт", [("create_file", {"ext": "docx", "name": "отчёт"})]),
+    ("создай презентацию", [("create_file", {"ext": "pptx"})]),
+    ("создай папку проекты", [("create_file", {"ext": "", "name": "проекты"})]),
+    ("создай текстовый файл и назови его заметки", [("create_file", {"ext": "txt", "name": "заметки"})]),
+    ("создай текстовый файл и открой его", [("create_file", {"ext": "txt"}), ("open_file", {})]),
+    ("открой файл отчёт", [("open_file", {"name": "отчёт"})]),
+    ("открой файл main точка py", [("open_file", {"name": "main точка py"})]),
+    ("открой папку проекты", [("open_file", {"name": "проекты", "folder": True})]),
+    ("открой папку загрузки", [("open_folder", {"name": "downloads"})]),
+    ("зайди в папку загрузки", [("open_folder", {"name": "downloads"})]),
+    ("удали файл отчёт", [("delete_file", {"name": "отчёт"})]),
+    ("удали файл список покупок с рабочего стола", [("delete_file", {"name": "список покупок", "where": "desktop"})]),
+    ("удали папку старое", [("delete_file", {"name": "старое", "folder": True})]),
+    ("найди файл main", [("select_file", {"name": "main"})]),             # не поиск в Google
+    ("выдели файл отчёт", [("select_file", {"name": "отчёт"})]),
+    ("закрой проводник", [("close_folder", {"everything": True})]),
+    ("закрой все папки", [("close_folder", {"everything": True})]),
+    ("закрой папку", [("close_folder", {})]),
+    ("закрой эту папку", [("close_folder", {})]),
+    ("закрой папку загрузки", [("close_folder", {"name": "загрузки"})]),
+    ("закрой папку загрузки и телеграм", [("close_folder", {"name": "загрузки"}), ("close_app", {"name": "телеграм"})]),
+    ("закрой телеграм и проводник", [("close_app", {"name": "телеграм"}), ("close_folder", {"everything": True})]),
+    ("на уровень выше", [("shortcut", {"action": "folder_up"})]),
+    ("верни удалённый файл", [("undo", {"kind": "delete"})]),
+    ("открой файл, который я последним редактировал", [("open_recent", {})]),
+
+    # из лога за 7 октября
+    ("закрой все приложения", [("request_close_all", {})]),
+    ("разве не браузер", [("open_app", {"name": "браузер"})]),             # «разверни браузер»
+    ("там, не знаю, запусти яндекс музыку", [("play_app", {"name": "яндекс музыка"})]),
 ]
 
 

@@ -201,6 +201,7 @@ LOG_MAX_MB = 1                   # храню ещё 2 старых файла
 
 # Браузер, сайты, папки
 BROWSER_EXE = None               # None - браузер по умолчанию
+TEXT_EDITOR = None               # чем «открой файл» открывает код и файлы без программы: None - VS Code или Блокнот
 
 SITES = {
     "youtube": "https://www.youtube.com",

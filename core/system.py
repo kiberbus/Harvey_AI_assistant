@@ -26,6 +26,8 @@ from core.util import (  # noqa: F401
 )
 from core.winapi import (  # noqa: F401
     KEYEVENTF_KEYUP,
+    _force_foreground,
+    _top_windows,
     _user32,
 )
 from core import browser
@@ -34,13 +36,32 @@ KEYEVENTF_EXTENDEDKEY = 0x0001
 CTRL, SHIFT, ALT, WIN = 0x11, 0x10, 0x12, 0x5B
 TAB, ENTER, ESC, SPACE, BACK, DELETE = 0x09, 0x0D, 0x1B, 0x20, 0x08, 0x2E
 LEFT, UP, RIGHT, DOWN = 0x25, 0x26, 0x27, 0x28
-PAGE_UP, PAGE_DOWN, END_KEY, HOME = 0x21, 0x22, 0x23, 0x24
+PAGE_UP, PAGE_DOWN, END_KEY, HOME, INSERT = 0x21, 0x22, 0x23, 0x24, 0x2D
 F5, F11 = 0x74, 0x7A
 # Клавиши Browser Back / Forward: их понимают все браузеры и Проводник, и в отличие от
 # Alt+Left они не открывают меню, если Alt проскочит отдельно
 BROWSER_BACK, BROWSER_FORWARD = 0xA6, 0xA7
 # Без флага стрелки и Page Down - клавиши цифрового блока (с NumLock Page Down напечатал бы «3»)
-_EXTENDED = {LEFT, UP, RIGHT, DOWN, DELETE, PAGE_UP, PAGE_DOWN, END_KEY, HOME, BROWSER_BACK, BROWSER_FORWARD}
+_EXTENDED = {LEFT, UP, RIGHT, DOWN, DELETE, INSERT, PAGE_UP, PAGE_DOWN, END_KEY, HOME, BROWSER_BACK, BROWSER_FORWARD}
+
+# «Нажми ctrl g»: клавиша → код. Названия голосом - KEY_NAMES в phrases.py
+KEY_CODES: dict[str, int] = {
+    "ctrl": CTRL, "shift": SHIFT, "alt": ALT, "win": WIN, "enter": ENTER, "esc": ESC, "tab": TAB, "space": SPACE,
+    "backspace": BACK, "delete": DELETE, "insert": INSERT, "home": HOME, "end": END_KEY, "pageup": PAGE_UP,
+    "pagedown": PAGE_DOWN, "up": UP, "down": DOWN, "left": LEFT, "right": RIGHT, "capslock": 0x14, "printscreen": 0x2C,
+    **{f"f{n}": 0x6F + n for n in range(1, 25)},
+    **{ch: ord(ch.upper()) for ch in "abcdefghijklmnopqrstuvwxyz0123456789"},
+}
+MODIFIERS = {"ctrl", "shift", "alt", "win"}
+# Как ИИ может назвать клавишу
+_KEY_ALIASES = {"control": "ctrl", "escape": "esc", "del": "delete", "return": "enter", "windows": "win",
+                "pgup": "pageup", "pgdn": "pagedown", "page_up": "pageup", "page_down": "pagedown", "ins": "insert",
+                "arrowup": "up", "arrowdown": "down", "arrowleft": "left", "arrowright": "right", "caps": "capslock"}
+_KEY_LABELS = {"ctrl": "Ctrl", "shift": "Shift", "alt": "Alt", "win": "Win", "enter": "Enter", "esc": "Escape",
+               "tab": "Tab", "space": "пробел", "backspace": "Backspace", "delete": "Delete", "insert": "Insert",
+               "home": "Home", "end": "End", "pageup": "Page Up", "pagedown": "Page Down", "up": "вверх",
+               "down": "вниз", "left": "влево", "right": "вправо", "capslock": "Caps Lock", "printscreen": "Print Screen"}
+PRESS_MAX_TIMES = 50
 
 
 def _key(letter: str) -> int:
@@ -88,6 +109,7 @@ SHORTCUT_KEYS: dict[str, tuple[list[tuple[int, ...]], str]] = {
     "window_up": ([(WIN, UP)], f"развернул{END} окно"),
     "window_down": ([(WIN, DOWN)], f"уменьшил{END} окно"),
     "window_monitor": ([(WIN, SHIFT, RIGHT)], f"{'перенесла' if FEMALE_VOICE else 'перенёс'} окно на другой монитор"),
+    "folder_up": ([(ALT, UP)], f"{'перешла' if FEMALE_VOICE else 'перешёл'} в папку выше"),
 }
 
 
@@ -111,9 +133,47 @@ def shortcut(action: str) -> str:
         return f"{FAIL}не знаю действие «{action}»"
     if action in BROWSER_ACTIONS and not browser.foreground_kind() and not browser.focus_browser():
         return f"{FAIL}браузер не открыт"
+    if action == "folder_up" and browser.foreground_kind() != "explorer" and not _focus_explorer():
+        return f"{FAIL}папка не открыта"           # Alt+↑ в другой программе сделал бы своё (в VS Code - двигает строку)
     if action in TAB_SWITCH_ACTIONS:
         browser.mark_tab_action()
     return press_chords(action)
+
+
+def _focus_explorer() -> bool:
+    """Выводит вперёд верхнее окно проводника. False - папки не открыты."""
+    hwnd = next((hwnd for hwnd, _title, cls, _pid in _top_windows() if cls == "CabinetWClass"), None)
+    if hwnd is None:
+        return False
+    _force_foreground(hwnd)
+    time.sleep(0.15)
+    return True
+
+
+def press_keys(keys: str, times: int = 1) -> str:
+    """«Нажми ctrl g», «нажми w и d», «нажми enter три раза» - в активном окне. keys - сочетания через «+»,
+    по очереди через запятую: "ctrl+c, ctrl+v". Клавиши сочетания жму вместе и отпускаю в обратном порядке."""
+    chords: list[list[str]] = []
+    for part in (keys or "").lower().split(","):
+        names = [_KEY_ALIASES.get(n.strip(), n.strip()) for n in part.replace(" ", "+").split("+") if n.strip()]
+        unknown = next((n for n in names if n not in KEY_CODES), None)
+        if unknown:
+            return f"{FAIL}не знаю клавишу «{unknown}»"
+        if names:
+            chords.append(names)
+    if not chords:
+        return f"{FAIL}не понял{END}, какие клавиши нажать"
+    from core.apps import foreground_is_mine        # apps импортирует этот модуль - импорт здесь
+    if foreground_is_mine():
+        return f"{FAIL}впереди моё окно, сначала переключитесь туда, где нажать"
+    times = max(1, min(int(times or 1), PRESS_MAX_TIMES))
+    for i in range(times):
+        for j, chord in enumerate(chords):
+            if i or j:
+                time.sleep(0.05)
+            _chord(*(KEY_CODES[name] for name in chord))
+    label = ", ".join("+".join(_KEY_LABELS.get(name, name.upper()) for name in chord) for chord in chords)
+    return f"нажал{END} {label}" + (f" {times} {_plural(times, 'раз', 'раза', 'раз')}" if times > 1 else "")
 
 
 def press_chords(action: str) -> str:

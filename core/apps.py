@@ -27,7 +27,6 @@ from config import (
     SPEAK_ERRORS,
 )
 from phrases import (
-    FOLDER_ALIASES,
     SITE_ALIASES,
 )
 from core.util import (  # noqa: F401
@@ -38,10 +37,13 @@ from core.util import (  # noqa: F401
     OWN_PID,
     _cap,
     _clamp,
+    _plural,
     log,
     psutil,
 )
 from core.winapi import (  # noqa: F401
+    GW_OWNER,
+    GWL_EXSTYLE,
     KEYEVENTF_KEYUP,
     SW_MAXIMIZE,
     SW_MINIMIZE,
@@ -54,13 +56,16 @@ from core.winapi import (  # noqa: F401
     VK_TAB,
     WM_CLOSE,
     WNDENUMPROC,
+    WS_EX_TOOLWINDOW,
     _find_procs,
     _force_foreground,
+    _top_windows,
     _user32,
     _windows_of,
     bring_to_front,
     foreground_title,
     half,
+    is_cloaked,
     move_to_next_monitor,
     paste_text,
     place_window,
@@ -71,7 +76,10 @@ from core.speech import (  # noqa: F401
     play_sound,
     speak,
 )
-from core import browser, steam
+from core.daily import (  # noqa: F401
+    ask_confirm,
+)
+from core import browser, files, steam
 
 
 def set_brightness(level: int) -> str:
@@ -418,7 +426,10 @@ def _close_exes(targets: set[str], label: str) -> str:
         return f"{FAIL}«{label}» не запущено"
 
     _taskkill([p.pid for p in procs], wait=False)
-    _, alive = psutil.wait_procs(procs, timeout=CLOSE_QUICK_WAIT)
+    try:
+        _, alive = psutil.wait_procs(procs, timeout=CLOSE_QUICK_WAIT)
+    except psutil.AccessDenied:          # из лога: диспетчер задач запущен от администратора
+        return f"{FAIL}«{label}» запущен от имени администратора, закрыть его я не могу"
     if alive:
         threading.Thread(target=_finish_close, args=(alive, targets, label), daemon=True).start()
     return f"закрыл{END} {label}"
@@ -452,10 +463,11 @@ def minimize_app(name: str) -> str:
 
 
 def close_app(name: str) -> str:
-    """"закрой телеграм" - приложение, "закрой загрузки" - папка, "закрой ютуб" - вкладка."""
+    """"закрой телеграм" - приложение, "закрой загрузки" - папка, "закрой проводник" - все папки,
+    "закрой ютуб" - вкладка."""
     if psutil is None:
         raise RuntimeError("psutil не установлен")
-    folder = _close_folder_window(name)
+    folder = files.close_named(name)
     if folder:
         return folder
     targets = _target_exes(name)
@@ -465,46 +477,6 @@ def close_app(name: str) -> str:
         if not tab.startswith((INFO, FAIL)):
             return tab
     return _close_exes(targets, name)
-
-
-def _top_windows() -> list[tuple[int, str, str, int]]:
-    """(hwnd, заголовок, класс, pid) видимых окон верхнего уровня."""
-    found: list[tuple[int, str, str, int]] = []
-    title, cls = ctypes.create_unicode_buffer(512), ctypes.create_unicode_buffer(128)
-
-    def callback(hwnd, _lparam):
-        if _user32.IsWindowVisible(hwnd) and _user32.GetWindowTextW(hwnd, title, 512):
-            _user32.GetClassNameW(hwnd, cls, 128)
-            pid = wintypes.DWORD()
-            _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-            found.append((hwnd, title.value, cls.value, pid.value))
-        return True
-
-    _user32.EnumWindows(WNDENUMPROC(callback), 0)
-    return found
-
-
-def _folder_names(name: str) -> set[str] | None:
-    low = name.strip().lower()
-    key = FOLDER_ALIASES.get(low) or (low if low in FOLDERS else None)
-    if key is None:
-        return None
-    return ({low, key, Path(FOLDERS[key]).name.lower()}
-            | {alias for alias, k in FOLDER_ALIASES.items() if k == key})
-
-
-def _close_folder_window(name: str) -> str | None:
-    """Закрывает окна проводника с этой папкой. None - это не папка."""
-    names = _folder_names(name)
-    if names is None:
-        return None
-    windows = [hwnd for hwnd, title, cls, _ in _top_windows()
-               if cls == "CabinetWClass" and title.strip().lower() in names]
-    if not windows:
-        return f"{INFO}папка «{name}» не открыта"
-    for hwnd in windows:
-        _user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
-    return f"закрыл{END} папку {name}"
 
 
 def _site_key(name: str) -> str | None:
@@ -541,6 +513,55 @@ def close_active(window_only: bool = False) -> str:
         _user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
         return f"закрыл{END} окно «{title}»"
     return _close_exes({exe}, title)
+
+
+_SHELL_CLASSES = {"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}
+
+
+def _app_windows() -> list[tuple[int, str]]:
+    """Окна программ, как на панели задач: (hwnd, процесс). Без самой Харви, её консоли и рабочего стола."""
+    skip_pids, ancestor_exes = _protected()
+    found = []
+    for hwnd, _title, cls, pid in _top_windows():
+        if (cls in _SHELL_CLASSES or pid in skip_pids or _user32.GetWindow(hwnd, GW_OWNER)
+                or _user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW or is_cloaked(hwnd)):
+            continue
+        try:
+            exe = psutil.Process(pid).name().lower()
+        except Exception:
+            continue
+        folder = exe == "explorer.exe" and cls == "CabinetWClass"
+        if not folder and (exe in PROTECTED_EXES or exe in ancestor_exes):
+            continue
+        found.append((hwnd, exe))
+    return found
+
+
+def request_close_all() -> str:
+    """«Закрой все приложения» - только после «да»."""
+    if psutil is None:
+        raise RuntimeError("psutil не установлен")
+    count = len(_app_windows())
+    if not count:
+        return f"{INFO}открытых окон нет"
+    return ask_confirm("close_all_apps", {}, f"Закрыть все программы, господин? Открыто "
+                                             f"{count} {_plural(count, 'окно', 'окна', 'окон')}.")
+
+
+def close_all_apps() -> str:
+    """Папки закрываю как окна, программы - как «закрой X» (вместе с их помощниками: Steam - и steamwebhelper)."""
+    windows = _app_windows()
+    exes = {exe for _, exe in windows if exe != "explorer.exe"}
+    if any(exe == "explorer.exe" for _, exe in windows):
+        files.close_folder(everything=True)
+    failed = []
+    for exe in sorted(exes):
+        group = next((set(procs) for _, procs in NAME_GROUPS if exe in procs), {exe})
+        if _close_exes(group, Path(exe).stem).startswith(FAIL):
+            failed.append(Path(exe).stem)
+    if failed:
+        return f"{FAIL}не закрылись: {', '.join(failed)}"
+    return f"закрыл{END} все программы"
 
 
 def _chord(*vks: int) -> None:
