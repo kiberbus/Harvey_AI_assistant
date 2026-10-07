@@ -447,6 +447,10 @@ def test_collect_saves_without_whisper(monkeypatch, tmp_path):
     from core import stt
     monkeypatch.setattr(stt, "WAKE_SAMPLES_DIR", tmp_path)
     monkeypatch.setattr(stt, "_whisper_model", None)                       # видеокарта не нужна
+    monkeypatch.setattr(stt, "WAKE_COLLECT", False)
+    stt.collect_name_sample(_harvey_like(stt.SAMPLE_RATE, 0.15))
+    assert not list(tmp_path.glob("*.wav"))                                 # сбор выключен - ничего не пишу
+    monkeypatch.setattr(stt, "WAKE_COLLECT", True)
     stt.collect_name_sample(_harvey_like(stt.SAMPLE_RATE, 0.15))
     _time.sleep(0.05)
     while stt._collect_lock.locked():
