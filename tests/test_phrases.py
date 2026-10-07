@@ -495,6 +495,15 @@ def test_click_exit_button_does_not_exit(calls, monkeypatch):
     assert calls == [("click", {"name": "выход"})]
 
 
+def test_whole_click_only_for_button_names():
+    """«И» внутри надписи - только перед неопределённой формой; числа - это клавиши («нажми alt и пять»)."""
+    from core import parse
+    assert parse._whole_click("нажми сохранить и закрыть")
+    assert parse._whole_click("нажми alt и пять") is None
+    assert parse._whole_click("нажми ctrl и шесть") is None
+    assert parse._whole_click("нажми ок и закрой телеграм") is None
+
+
 def test_click_is_not_quick_command():
     """«Нажми под…» после короткой паузы не выполняю: надпись могут ещё договаривать."""
     from core import parse

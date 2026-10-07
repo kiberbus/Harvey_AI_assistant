@@ -154,7 +154,8 @@ def parse_side_by_side(low: str) -> Callable[[], str] | None:
 
 CLICK_RE = re.compile(CLICK)
 CLICK_NOT_NAME_RE = re.compile(CLICK_NOT_NAME)
-_INFINITIVE_RE = re.compile(r"^\w+(?:ть|ться|ти|чь)(?:\s|$)")
+# Неопределённая форма, как в надписях на кнопках; «пять», «шесть» - клавиши («нажми alt и пять»), а не кнопка
+_INFINITIVE_RE = re.compile(r"^(?!(?:пять|шесть|девять|десять|\w+дцать)\b)\w+(?:ть|ться|ти|чь)(?:\s|$)")
 
 
 def click_target(seg: str) -> str | None:
@@ -1043,11 +1044,11 @@ def parse_all(low: str, scenes: bool = True) -> list[Callable[[], str]] | None:
     tab_action = parse_browser(low)                     # «назад», «закрой вкладку ютуб» - до медиа и поиска
     if tab_action:
         return [tab_action]
-    click = _whole_click(low)                           # «нажми принять и продолжить» - одна кнопка
-    if click:
-        return [click]
     if any(rx.search(low) for _, rx in SHORTCUT_RES):
         return [parse_local(low)]                       # «назад в браузере», «следующая вкладка»
+    click = _whole_click(low)                           # «нажми принять и продолжить» - одна кнопка; после клавиш
+    if click:
+        return [click]
     if MUSIC_APP_RE.fullmatch(low):                     # «запусти яндекс музыку» - открыть и сразу включить
         return [lambda: tools.execute_tool("play_app", {"name": MEDIA_FALLBACK_APP["music"]})]
     # "ютуб стоп" - пауза, "ютуб на 30" - громкость, а не поиск; напоминание по "и" не режу
