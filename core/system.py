@@ -34,11 +34,13 @@ KEYEVENTF_EXTENDEDKEY = 0x0001
 CTRL, SHIFT, ALT, WIN = 0x11, 0x10, 0x12, 0x5B
 TAB, ENTER, ESC, SPACE, BACK, DELETE = 0x09, 0x0D, 0x1B, 0x20, 0x08, 0x2E
 LEFT, UP, RIGHT, DOWN = 0x25, 0x26, 0x27, 0x28
+PAGE_UP, PAGE_DOWN, END_KEY, HOME = 0x21, 0x22, 0x23, 0x24
 F5, F11 = 0x74, 0x7A
 # Клавиши Browser Back / Forward: их понимают все браузеры и Проводник, и в отличие от
 # Alt+Left они не открывают меню, если Alt проскочит отдельно
 BROWSER_BACK, BROWSER_FORWARD = 0xA6, 0xA7
-_EXTENDED = {LEFT, UP, RIGHT, DOWN, DELETE, BROWSER_BACK, BROWSER_FORWARD}   # без флага стрелки - цифровой блок
+# Без флага стрелки и Page Down - клавиши цифрового блока (с NumLock Page Down напечатал бы «3»)
+_EXTENDED = {LEFT, UP, RIGHT, DOWN, DELETE, PAGE_UP, PAGE_DOWN, END_KEY, HOME, BROWSER_BACK, BROWSER_FORWARD}
 
 
 def _key(letter: str) -> int:
@@ -66,6 +68,10 @@ SHORTCUT_KEYS: dict[str, tuple[list[tuple[int, ...]], str]] = {
     "down": ([(DOWN,)], f"нажал{END} вниз"),
     "left": ([(LEFT,)], f"нажал{END} влево"),
     "right": ([(RIGHT,)], f"нажал{END} вправо"),
+    "page_down": ([(PAGE_DOWN,)], f"пролистал{END} вниз"),
+    "page_up": ([(PAGE_UP,)], f"пролистал{END} вверх"),
+    "page_top": ([(CTRL, HOME)], f"{'перешла' if FEMALE_VOICE else 'перешёл'} в начало"),     # и в браузере, и в документе
+    "page_bottom": ([(CTRL, END_KEY)], f"{'перешла' if FEMALE_VOICE else 'перешёл'} в конец"),
     "new_tab": ([(CTRL, _key("t"))], f"открыл{END} новую вкладку"),
     "close_tab": ([(CTRL, _key("w"))], f"закрыл{END} вкладку"),
     "reopen_tab": ([(CTRL, SHIFT, _key("t"))], f"вернул{END} закрытую вкладку"),

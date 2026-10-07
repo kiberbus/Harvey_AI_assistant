@@ -71,7 +71,7 @@ from core.speech import (  # noqa: F401
     play_sound,
     speak,
 )
-from core import browser
+from core import browser, steam
 
 
 def set_brightness(level: int) -> str:
@@ -163,6 +163,13 @@ def find_app(query: str) -> dict | None:
     return None
 
 
+def exact_app(name: str) -> dict | None:
+    """Приложение ровно с таким названием, как в Пуске: «obsidian» без глагола. Без нечёткого поиска
+    find_app: иначе любое слово в разговоре открывало бы что-нибудь похожее."""
+    low = name.strip().lower()
+    return next((a for a in _load_start_apps() if a["Name"].lower() == low), None)
+
+
 def default_browser_exe() -> str | None:
     if BROWSER_EXE:
         return BROWSER_EXE
@@ -183,6 +190,12 @@ def default_browser_exe() -> str | None:
 def open_app(name: str) -> str:
     app = find_app(name)
     if not app:
+        # ИИ просит сайт и игру как приложение (из лога: «Google Translate», «Colab» - «не найдено»)
+        site = _site_key(name)
+        if site:
+            return open_browser(site)
+        if steam.find_game(name):
+            return steam.launch(name)
         return f"{FAIL}приложение «{name}» не найдено"
 
     # Если уже запущено - не запускаю второй экземпляр, а показываю окно
@@ -494,13 +507,18 @@ def _close_folder_window(name: str) -> str | None:
     return f"закрыл{END} папку {name}"
 
 
-def _site_keywords(name: str) -> set[str]:
+def _site_key(name: str) -> str | None:
+    """Ключ из SITES, если name - название сайта целиком: «google translate» → translate."""
     low = name.strip().lower()
-    for site, pattern in SITE_ALIASES.items():
-        if re.fullmatch(pattern, low):
-            host = urllib.parse.urlparse(SITES[site]).hostname or ""
-            return {low, site, host.removeprefix("www.").split(".")[0]}
-    return set()
+    return next((site for site, pattern in SITE_ALIASES.items() if re.fullmatch(pattern, low)), None)
+
+
+def _site_keywords(name: str) -> set[str]:
+    site = _site_key(name)
+    if site is None:
+        return set()
+    host = urllib.parse.urlparse(SITES[site]).hostname or ""
+    return {name.strip().lower(), site, host.removeprefix("www.").split(".")[0]}
 
 
 def close_active(window_only: bool = False) -> str:

@@ -130,6 +130,25 @@ PHRASE_CASES = [
     ("перезапустись", [("restart_self", {})]),
     ("рестарт", [("restart_self", {})]),
 
+    # из лога: уходило в ИИ
+    ("obsidian", [("open_app", {"name": "obsidian"})]),             # название из Пуска без глагола
+    ("пролистни вниз", [("shortcut", {"action": "page_down"})]),
+    ("листай", [("shortcut", {"action": "page_down"})]),
+    ("прокрути вверх", [("shortcut", {"action": "page_up"})]),
+    ("в начало страницы", [("shortcut", {"action": "page_top"})]),
+    ("пролистай в самый низ", [("shortcut", {"action": "page_bottom"})]),
+    ("вниз", [("shortcut", {"action": "down"})]),                    # голое «вниз» - по-прежнему стрелка
+    ("этот компьютер", [("open_folder", {"name": "computer"})]),
+    ("открой мой компьютер", [("open_folder", {"name": "computer"})]),
+    ("открой мою почту", [("open_browser", {"site": "mail"})]),
+    ("почта", [("open_browser", {"site": "mail"})]),
+
+    # игры из Steam (библиотека подменена в conftest.py)
+    ("запусти игру marvel rivals", [("launch_game", {"name": "marvel rivals"})]),
+    ("давай поиграем в риск оф рейн", [("launch_game", {"name": "риск оф рейн"})]),
+    ("запусти марвел ривалс", [("open_app", {"name": "марвел ривалс"})]),
+    ("открой дивинити", [("open_app", {"name": "дивинити"})]),
+
     # игровой режим: «включи X» - не приложение, «выключи» - не медиа
     ("игровой режим", [("game_mode", {"state": True})]),
     ("включи игровой режим", [("game_mode", {"state": True})]),
@@ -318,6 +337,8 @@ def test_phrase(run, phrase, expected):
     "сколько лайков у этого видео",
     "рядом дом и магазин",       # не приложения - не раскладка окон
     "в каком режиме игры лучше играть",   # разговор об игре - не команда
+    "запусти что-нибудь весёлое",        # не игра и не приложение
+    "марвел ривалс",                     # игру без глагола не запускаю: о ней могли просто говорить
 ])
 def test_goes_to_llm(run, phrase):
     assert run(phrase) is None
@@ -402,3 +423,22 @@ def test_what_did_you_do(monkeypatch):
     commands.handle_command("а что ты сделала")
     assert said[0].startswith("Я пока ничего не делал")
     assert said[1] == "На «закрой телеграм»: закрыла Telegram."
+
+
+def test_scene_runs_steps_in_order(calls, monkeypatch):
+    """Сценарий из config.py: шаги - обычные фразы. Непонятный шаг - ошибка, а не запрос к ИИ."""
+    from core import parse, util
+    monkeypatch.setattr(parse, "SCENES", {"Рабочий режим": ["открой claude", "громкость 30", "сделай что-нибудь"]})
+    for phrase in ("рабочий режим", "включи рабочий режим", "давай рабочий режим"):
+        calls.clear()
+        results = [action() for action in parse.parse_all(phrase)]
+        assert calls == [("open_app", {"name": "claude"}), ("set_volume", {"level": 30})]
+        assert results[-1].startswith(util.FAIL) and "сделай что-нибудь" in results[-1]
+    assert parse.parse_all("рабочий") is None
+
+
+def test_scene_calling_itself_does_not_loop(calls, monkeypatch):
+    from core import parse, util
+    monkeypatch.setattr(parse, "SCENES", {"петля": ["петля", "пауза"]})
+    results = [action() for action in parse.parse_all("петля")]
+    assert results[0].startswith(util.FAIL) and calls == [("media", {"action": "pause", "target": None})]

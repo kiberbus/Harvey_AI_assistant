@@ -468,6 +468,61 @@ def test_folder_and_site_names():
     assert apps._site_keywords("телеграм") == set()
 
 
+def test_open_app_falls_back_to_site_and_game(monkeypatch):
+    """Из лога: ИИ просил «Google Translate» и «Colab» как приложения и получал «не найдено»."""
+    from core import apps, steam
+    opened = []
+    monkeypatch.setattr(apps, "open_browser", lambda site="", query="": opened.append(site) or "ok")
+    monkeypatch.setattr(steam, "launch", lambda name: opened.append("steam:" + name) or "ok")
+    apps.open_app("Google Translate")
+    apps.open_app("Colab")
+    apps.open_app("Marvel Rivals")
+    assert opened == ["translate", "colab", "steam:Marvel Rivals"]
+    assert apps.open_app("Такого нет").startswith(F)
+
+
+def test_exact_app_needs_whole_name():
+    from core import apps
+    assert apps.exact_app("Obsidian")["AppID"] == "md.obsidian"
+    assert apps.exact_app("obsid") is None                    # find_app нашёл бы, а без глагола - нет
+    assert apps.find_app("obsid") is not None
+
+
+@pytest.mark.parametrize("spoken,game", [
+    ("Marvel Rivals", "Marvel Rivals"),
+    ("марвел ривалс", "Marvel Rivals"),
+    ("риск оф рейн два", "Risk of Rain 2"),
+    ("дивинити", "Divinity: Original Sin 2"),                 # начала названия хватит
+    ("но мэнс скай", "No Man's Sky"),
+    ("телеграм", None),
+    ("что-нибудь весёлое", None),
+    ("ри", None),
+])
+def test_find_steam_game(spoken, game):
+    from core import steam
+    found = steam.find_game(spoken)
+    assert (found["name"] if found else None) == game
+
+
+def test_steam_library_from_all_folders(monkeypatch, tmp_path):
+    """Игры лежат в нескольких папках библиотеки (C: и D:), список папок - в libraryfolders.vdf."""
+    from core import steam
+    main, other = tmp_path / "Steam", tmp_path / "SteamLibrary"
+    for folder in (main / "steamapps", other / "steamapps"):
+        folder.mkdir(parents=True)
+    escaped = str(other).replace("\\", "\\\\")
+    (main / "steamapps" / "libraryfolders.vdf").write_text(
+        f'"libraryfolders"\n{{\n\t"0"\n\t{{\n\t\t"path"\t\t"{escaped}"\n\t}}\n}}\n', encoding="utf-8")
+    manifests = {main: [("228980", "Steamworks Common Redistributables"), ("262060", "Darkest Dungeon®")],
+                 other: [("2767030", "Marvel Rivals")]}
+    for folder, apps_in in manifests.items():
+        for appid, name in apps_in:
+            (folder / "steamapps" / f"appmanifest_{appid}.acf").write_text(
+                f'"AppState"\n{{\n\t"appid"\t\t"{appid}"\n\t"name"\t\t"{name}"\n}}\n', encoding="utf-8")
+    monkeypatch.setattr(steam, "_steam_dir", lambda: main)
+    assert sorted(g["name"] for g in steam._scan()) == ["Darkest Dungeon", "Marvel Rivals"]
+
+
 @pytest.mark.parametrize("spoken,title,found", [
     ("google календарем", "Google Календарь - среда, 7 октября 2026, сегодня", True),   # из лога: «вкладки нет»
     ("гитхабом", "GitHub", True),

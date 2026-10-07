@@ -14,6 +14,7 @@ from config import (
     BRIGHTNESS_STEP,
     CURRENCY_HOME,
     MEDIA_FALLBACK_APP,
+    SCENES,
     VOLUME_STEP,
 )
 from phrases import (
@@ -30,9 +31,11 @@ from phrases import (
     DRIVE_LETTERS,
     FOLDER_ALIASES,
     FORWARD_OR_NEXT,
+    GAME_LAUNCH,
     GOOGLE,
     HEARING_FIXES,
     MUSIC_APP,
+    SCENE_VERBS,
     SIDE_BY_SIDE,
     TAB_CLOSE_NAMED,
     TAB_CONTEXT_NEXT,
@@ -57,6 +60,8 @@ from core.util import (  # noqa: F401
     BARE_SEARCH_RE,
     COMPLEX_MARKERS,
     DRIVE_RE,
+    END,
+    FAIL,
     INFO,
     IN_BROWSER_RE,
     MEDIA_FILLER_RE,
@@ -85,12 +90,13 @@ from core.util import (  # noqa: F401
     parse_number,
 )
 from core.apps import (  # noqa: F401
+    exact_app,
     find_app,
 )
 from core.daily import (  # noqa: F401
     parse_duration,
 )
-from core import browser, calc, system  # noqa: F401
+from core import browser, calc, steam, system  # noqa: F401
 from core import tools
 from core.audio import (  # noqa: F401
     device_alias,
@@ -108,6 +114,23 @@ def _currency_codes(seg: str) -> list[str]:
 
 WINDOW_PLACE_RE = re.compile(WINDOW_PLACE)
 SIDE_BY_SIDE_RES = [re.compile(p) for p in SIDE_BY_SIDE]
+GAME_LAUNCH_RE = re.compile(GAME_LAUNCH)
+SCENE_RE = re.compile(rf"^(?:{SCENE_VERBS}\s+)?(?P<name>.+)$")
+
+
+def parse_scene(low: str) -> list[Callable[[], str]] | None:
+    """«Рабочий режим» из SCENES: шаги - обычные фразы, разбираю их теми же правилами и выполняю по очереди.
+    Шаг, который правила не поняли, не отдаю ИИ, а говорю о нём: сценарий нужно поправить в config.py.
+    Сценарий внутри сценария не разворачиваю: так сценарий, который зовёт сам себя, не зациклится."""
+    m = SCENE_RE.match(low)
+    steps = {name.lower(): steps for name, steps in SCENES.items()}.get(m.group("name").strip(PUNCT)) if m else None
+    if steps is None:
+        return None
+    actions: list[Callable[[], str]] = []
+    for step in steps:
+        actions += (parse_all(step.lower(), scenes=False)
+                    or [lambda s=step: f"{FAIL}в сценарии не понял{END} шаг «{s}»"])
+    return actions
 
 
 def _known_app(name: str) -> bool:
@@ -341,7 +364,7 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     for site, pattern in SITE_PATTERNS:
         if pattern.fullmatch(seg):
             return lambda s=site: tools.execute_tool("open_browser", {"site": s})
-    if seg in APP_ALIASES:
+    if seg in APP_ALIASES or exact_app(seg):         # «obsidian» без глагола - из лога, уходило в ИИ (6 с)
         return lambda: tools.execute_tool("open_app", {"name": seg})
     if seg in BARE_FOLDERS:
         return lambda: tools.execute_tool("open_folder", {"name": FOLDER_ALIASES[seg]})
@@ -359,11 +382,17 @@ def parse_local(segment: str) -> Callable[[], str] | None:
         if folder and (m.group(1) or alias in BARE_FOLDERS):
             return lambda: tools.execute_tool("open_folder", {"name": folder})
 
-    # Открыть приложение. Музыку, звук и видео "включи" уже разобрало выше
+    # «Запусти игру Marvel Rivals», «давай поиграем в риск оф рейн» - Steam
+    m = GAME_LAUNCH_RE.match(seg)
+    if m:
+        return lambda name=m.group("name").strip(PUNCT): tools.execute_tool("launch_game", {"name": name})
+
+    # Открыть приложение. Музыку, звук и видео "включи" уже разобрало выше.
+    # Нет такого приложения - может, это игра из Steam («запусти марвел ривалс»), open_app найдёт и её
     m = re.match(r"(?:открой|запусти|открыть|запустить|включи|вруби)\s+(.+)", seg)
     if m and (m.group(1).strip() in APP_ALIASES or not any(marker in seg for marker in COMPLEX_MARKERS)):
         target = m.group(1).strip()
-        if find_app(target):
+        if find_app(target) or steam.find_game(target):
             return lambda: tools.execute_tool("open_app", {"name": target})
 
     return None
@@ -947,9 +976,12 @@ def _bare_name(segment: str) -> bool:
             or segment in ("браузер", "browser"))
 
 
-def parse_all(low: str) -> list[Callable[[], str]] | None:
+def parse_all(low: str, scenes: bool = True) -> list[Callable[[], str]] | None:
     """Разбирает всю команду. Если хоть одна часть не разобралась - None, и всё уходит в ИИ."""
     low = fix_hearing(low)
+    scene = parse_scene(low) if scenes else None        # свои фразы из config.py - важнее всех правил
+    if scene:
+        return scene
     calendar = parse_calendar(low)                      # раньше вкладок и цепочек: «встреча с Машей и Петей» - одна
     if calendar:
         return [calendar]

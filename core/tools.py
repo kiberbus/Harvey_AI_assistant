@@ -70,7 +70,7 @@ from core.daily import (  # noqa: F401
 from core.tray import (  # noqa: F401
     restart_self,
 )
-from core import browser, calc, game, system, undo
+from core import browser, calc, game, steam, system, undo
 from core import gcal
 
 
@@ -102,6 +102,7 @@ FUNCTIONS: dict[str, Callable[..., str]] = {
     "set_timer": set_timer,
     "cancel_timers": cancel_timers,
     "open_app": open_app,
+    "launch_game": steam.launch,
     "open_browser": open_browser,
     "open_folder": open_folder,
     "open_recent": open_recent,
@@ -162,6 +163,8 @@ _DAY = {"type": "string", "description": "Дата ГГГГ-ММ-ДД (сего�
 TOOLS = [
     _tool("open_app", "Открыть установленное приложение.",
           {"name": {"type": "string", "description": "Название на английском"}}, ["name"]),
+    _tool("launch_game", "Запустить игру из библиотеки Steam.",
+          {"name": {"type": "string", "description": "Название игры, как его сказали"}}, ["name"]),
     _tool("open_browser",
           "Открыть сайт или браузер. Для поиска на YouTube передай site='youtube' и query.",
           {"site": {"type": "string", "enum": list(SITES)}, "query": {"type": "string"}}, []),
@@ -212,8 +215,9 @@ TOOLS = [
     _tool("set_brightness", "Установить яркость экрана в процентах.", {"level": _PERCENT}, ["level"]),
     _tool("change_brightness", "Изменить яркость экрана на указанное число процентов.", {"delta": _DELTA}, ["delta"]),
     _tool("shortcut", "Нажать сочетание клавиш в активном окне: копировать, вставить, отменить, сохранить, "
-                      "выделить всё, очистить поле, Enter, вкладки браузера, обновить, назад, полный экран, "
-                      "окно влево/вправо, окно на другой монитор.",
+                      "выделить всё, очистить поле, Enter, прокрутить страницу (page_down/page_up, в начало, "
+                      "в конец), вкладки браузера, обновить, назад, полный экран, окно влево/вправо, "
+                      "окно на другой монитор.",
           {"action": {"type": "string", "enum": list(system.SHORTCUT_KEYS)}}, ["action"]),
     _tool("undo", "Отменить последнее действие ассистента: вернуть громкость или яркость, открыть заново "
                   "закрытое окно, убрать вставленный текст. Без kind - самое последнее, иначе Ctrl+Z.",

@@ -212,6 +212,7 @@ SITES = {
     "astanahub": "https://astanahub.com",
     "stepik": "https://stepik.org",
     "calendar": "https://calendar.google.com",
+    "mail": "https://mail.google.com",
 }
 
 _HOME = os.path.expanduser("~")
@@ -222,6 +223,14 @@ FOLDERS = {
     "pictures": os.path.join(_HOME, "Pictures"),
     "music": os.path.join(_HOME, "Music"),
     "videos": os.path.join(_HOME, "Videos"),
+    "computer": "shell:MyComputerFolder",     # «Этот компьютер»
+}
+
+# Сценарии: одна фраза - несколько команд подряд. Шаги - обычные фразы, как их сказали бы Харви
+# (понятные без ИИ). Название говорится целиком, можно с «включи»/«давай»: «Харви, рабочий режим»
+SCENES = {
+    "рабочий режим": ["открой claude", "открой obsidian", "открой телеграм", "включи музыку"],
+    "игровой вечер": ["открой steam", "открой discord", "музыку тише"],
 }
 
 # Приложения

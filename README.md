@@ -41,7 +41,8 @@ with tool calling. Replies are spoken with Silero or Piper TTS. Nothing leaves t
 | ⌨️ **Dictation** | "write ..." types text into the active window, the LLM adds punctuation |
 | 🧠 **AI** | "what is quantum entanglement", "translate the selection", "rewrite it politer", "what's on the screen" |
 | ⚡ **Power** | "shut down the PC" → "Are you sure?" → "yes" (with a delay you can cancel by voice) |
-| 🎮 **Game mode** | turns on by itself when a game is fullscreen: the LLM leaves video memory right after each answer; "game mode", "normal mode" |
+| 🎮 **Games** | "launch Marvel Rivals" (any installed Steam game); game mode turns on by itself when a game is fullscreen: the LLM leaves video memory right after each answer |
+| 🎬 **Scenes** | "work mode" opens Claude, Obsidian, Telegram and starts music; your own phrase lists in `config.py` |
 
 Commands can be chained ("volume 30 and pause"). After a reply Harvey keeps listening for a few seconds
 without the wake word (dialog mode).
@@ -124,6 +125,7 @@ core/
   stt.py speech.py     Whisper, VAD, openWakeWord; TTS and chimes
   apps.py media.py audio.py system.py daily.py calc.py   the actions themselves
   game.py        game mode: frees video memory while a game is running
+  steam.py       Steam library: launch installed games by voice
   winapi.py uia.py tray.py                               ctypes, UI Automation, tray
 tests/           348 tests, < 1 s; no mic, models or PowerShell needed
 ```
@@ -168,7 +170,8 @@ on your computer and can be turned off with `LOG_ENABLED`.
 | ⌨️ **Диктовка** | «запиши ...» печатает текст в активное окно, ИИ расставляет знаки препинания |
 | 🧠 **ИИ** | «что такое квантовая запутанность», «переведи выделенное», «перепиши вежливее», «что на экране» |
 | ⚡ **Питание** | «выключи компьютер» → «Вы уверены?» → «да» (с задержкой, можно отменить голосом) |
-| 🎮 **Игровой режим** | включается сам, когда игра на весь экран: модель ИИ уходит из видеопамяти сразу после ответа; «игровой режим», «обычный режим» |
+| 🎮 **Игры** | «запусти марвел ривалс» (любая игра из Steam); игровой режим включается сам, когда игра на весь экран: модель ИИ уходит из видеопамяти сразу после ответа |
+| 🎬 **Сценарии** | «рабочий режим» открывает Claude, Obsidian, Telegram и включает музыку; свои списки фраз - в `config.py` |
 
 Команды можно соединять: «громкость 30 и пауза». После ответа Харви ещё несколько секунд слушает
 продолжение без имени (режим диалога).
