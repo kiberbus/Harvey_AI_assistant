@@ -70,7 +70,7 @@ from core.daily import (  # noqa: F401
 from core.tray import (  # noqa: F401
     restart_self,
 )
-from core import browser, calc, game, steam, system, undo
+from core import browser, calc, game, steam, system, uia, undo
 from core import gcal
 
 
@@ -127,6 +127,7 @@ FUNCTIONS: dict[str, Callable[..., str]] = {
     "set_brightness": set_brightness,
     "change_brightness": change_brightness,
     "shortcut": system.shortcut,
+    "click": uia.click,
     "open_drive": system.open_drive,
     "system_status": system.system_status,
     "gpu_status": system.gpu_status,
@@ -219,6 +220,8 @@ TOOLS = [
                       "в конец), вкладки браузера, обновить, назад, полный экран, окно влево/вправо, "
                       "окно на другой монитор.",
           {"action": {"type": "string", "enum": list(system.SHORTCUT_KEYS)}}, ["action"]),
+    _tool("click", "Нажать то, что видно в активном окне: кнопку, ссылку, пункт меню или вкладку - по надписи на ней.",
+          {"name": {"type": "string", "description": "Надпись, как её сказали: «подписаться», «войти»"}}, ["name"]),
     _tool("undo", "Отменить последнее действие ассистента: вернуть громкость или яркость, открыть заново "
                   "закрытое окно, убрать вставленный текст. Без kind - самое последнее, иначе Ctrl+Z.",
           {"kind": {"type": "string", "enum": ["volume", "brightness", "close", "text"]}}, []),

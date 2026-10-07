@@ -49,6 +49,7 @@ from core.daily import (  # noqa: F401
     clear_pending,
 )
 from core.parse import (
+    click_target,
     fix_hearing,
     parse_all,
     parse_answer,
@@ -274,7 +275,7 @@ def handle_command(command: str) -> bool:
         _reply([execute_tool_dictate(smart.prepare_dictation(m.group(1)))], low)
         return True
 
-    if R["exit"].search(low):
+    if R["exit"].search(low) and not click_target(fix_hearing(low)):    # «нажми выход» - кнопка на экране
         speak_sync("Отключаюсь." if QUIET_MODE else "Слушаюсь, господин. Я отключаюсь.")
         return False
 

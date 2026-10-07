@@ -2,15 +2,38 @@
 
 Нужно для Яндекс Музыки: пока в ней ни разу не нажали play, Windows не видит её как плеер,
 и ни медиа-клавиши, ни SMTC на неё не действуют. А кнопку в окне нажать можно всегда.
-Так же ставится лайк: у Windows нет команды «нравится», а кнопка «Нравится» в окне есть."""
+Так же ставится лайк: у Windows нет команды «нравится», а кнопка «Нравится» в окне есть.
+
+И голосом: «нажми подписаться», «кликни на настройки» - click() ищет надпись в активном окне и нажимает."""
 
 from __future__ import annotations
 
+import ctypes
+import difflib
 import gc
+import re
 import time
+from ctypes import wintypes
 
-from core.util import log
-from core.winapi import _find_procs, _windows_of
+from core.util import (  # noqa: F401
+    END,
+    FAIL,
+    _LATIN,
+    _translit,
+    log,
+)
+from core.browser import (  # noqa: F401
+    _CASE_ENDING_RE,
+    _class_of,
+)
+from core.winapi import (  # noqa: F401
+    GW_OWNER,
+    WNDENUMPROC,
+    _DpiAware,
+    _find_procs,
+    _user32,
+    _windows_of,
+)
 
 
 def _uia():
@@ -102,3 +125,213 @@ def toggle_button(exes: set[str], name: str, state: bool, timeout: float = 3.0) 
     """Ставит кнопку-переключатель name («Нравится») в положение state.
     True - нажала, False - она уже так стояла, None - кнопки нет."""
     return _with_com(_toggle, exes, name, state, timeout)
+
+
+# --- «Нажми подписаться»: найти надпись в активном окне и нажать ---
+
+NOT_FOUND = f"{FAIL}не вижу на экране"
+AMBIGUOUS = f"{FAIL}на экране несколько похожих на"
+MISSED = (NOT_FOUND, AMBIGUOUS)               # так ничего и не нажала
+_CONTROLS = ("Button", "Hyperlink", "MenuItem", "TabItem", "ListItem", "CheckBox", "RadioButton",
+             "SplitButton", "TreeItem", "ComboBox", "DataItem")
+# Кнопки заголовка окна и крестики вкладок браузера не нажимаю: в Firefox они первые в дереве, и «нажми закрыть»
+# закрыло бы браузер, а не окошко на странице. Для окон есть «сверни», «закрой окно», «закрой вкладку»
+_CAPTION = {"закрыть", "свернуть", "развернуть", "восстановить", "свернуть в окно", "система"}
+_CAPTION_BAND = 80                            # высота заголовка и полосы вкладок, px
+_HOTKEY_RE = re.compile(r"\s*\([^()]{1,25}\)\s*$")      # «Пауза (k)», «Открыть новую вкладку (Ctrl+T)»
+_WORD_RE = re.compile(r"[a-zа-я0-9]+")
+# Chromium, Electron и Firefox строят дерево элементов только после первого запроса: сначала в нём 3 кнопки
+# заголовка, через полсекунды - вся страница
+_LAZY_CLASSES = ("Chrome_WidgetWin", "MozillaWindowClass")
+_LAZY_WAIT = 1.5
+MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
+
+
+def words(text: str) -> list[str]:
+    """Слова надписи для сравнения: нижний регистр, латиница по-русски («YouTube» - «ютуб»),
+    без падежных окончаний («нажми на корзину» - «Корзина»)."""
+    text = _HOTKEY_RE.sub("", text or "").lower().replace("ё", "е")
+    found: list[str] = []
+    for word in _WORD_RE.findall(text):
+        if word.isascii() and word.isalpha():
+            word = _LATIN.get(word) or _translit(word)
+        found += [_CASE_ENDING_RE.sub("", w) for w in word.split()]
+    return found
+
+
+def match_score(query: list[str], name: list[str], control: bool = True) -> float:
+    """Насколько надпись name похожа на сказанное query, 0 - не она. 4 - совпала целиком; 3 - начало надписи
+    («подписаться» - «Подписаться на канал»); 2 - внутри короткой надписи («настройки» - «Открыть настройки»);
+    1 - сказали больше, чем написано («пропустить рекламу» - «Пропустить»); меньше 1 - похоже на ослышку.
+    Простой текст (не кнопку) беру только целиком или по началу: иначе нажала бы абзац, где есть это слово."""
+    if not query or not name:
+        return 0
+    q, n = len(query), len(name)
+    if name == query:
+        return 4
+    if name[:q] == query:
+        return 3 if control or n <= q + 4 else 0
+    if not control:
+        return 0
+    if n <= q + 3 and any(name[i:i + q] == query for i in range(1, n - q + 1)):
+        return 2
+    if query[:n] == name:
+        return 1
+    said, shown = " ".join(query), " ".join(name)
+    ratio = difflib.SequenceMatcher(None, said, shown).ratio()
+    return ratio if len(said) >= 5 and ratio >= 0.8 else 0
+
+
+def _popups(fg: int) -> list[int]:
+    """Открытые меню и всплывающие окна активной программы. Они поверх окна, поэтому при равных надписях
+    выигрывают они: «нажми копировать» при открытом контекстном меню - пункт меню, а не кнопка на ленте."""
+    pid = wintypes.DWORD()
+    _user32.GetWindowThreadProcessId(fg, ctypes.byref(pid))
+    found: list[int] = []
+
+    def callback(hwnd, _lparam):
+        if hwnd != fg and _user32.IsWindowVisible(hwnd):
+            owner = wintypes.DWORD()
+            _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+            if owner.value == pid.value and (_class_of(hwnd) == "#32768" or _user32.GetWindow(hwnd, GW_OWNER) == fg):
+                found.append(hwnd)
+        return True
+
+    _user32.EnumWindows(WNDENUMPROC(callback), 0)
+    return found
+
+
+def _candidates(uia, ua, hwnd: int) -> list[tuple[str, bool, object, object]]:
+    """(надпись, кнопка ли это, элемент, прямоугольник) - всё видимое и доступное, что можно нажать,
+    и простой текст. Свойства берутся одним запросом (кэш): на странице бывают сотни ссылок."""
+    window = wintypes.RECT()
+    _user32.GetWindowRect(hwnd, ctypes.byref(window))
+    cache = uia.CreateCacheRequest()
+    for prop in (ua.UIA_NamePropertyId, ua.UIA_ControlTypePropertyId, ua.UIA_BoundingRectanglePropertyId):
+        cache.AddProperty(prop)
+    types = uia.CreatePropertyCondition(ua.UIA_ControlTypePropertyId, ua.UIA_TextControlTypeId)
+    for control in _CONTROLS:
+        types = uia.CreateOrCondition(types, uia.CreatePropertyCondition(
+            ua.UIA_ControlTypePropertyId, getattr(ua, f"UIA_{control}ControlTypeId")))
+    visible = uia.CreateAndCondition(uia.CreatePropertyCondition(ua.UIA_IsOffscreenPropertyId, False),
+                                     uia.CreatePropertyCondition(ua.UIA_IsEnabledPropertyId, True))
+    found = uia.ElementFromHandle(hwnd).FindAllBuildCache(
+        ua.TreeScope_Descendants, uia.CreateAndCondition(visible, types), cache)
+    result = []
+    for i in range(found.Length):
+        element = found.GetElement(i)
+        name, rect = element.CachedName, element.CachedBoundingRectangle
+        if not name or rect.right <= rect.left or rect.bottom <= rect.top:
+            continue
+        if name.strip().lower() in _CAPTION and rect.top < window.top + _CAPTION_BAND:
+            continue
+        result.append((name, element.CachedControlType != ua.UIA_TextControlTypeId, element, rect))
+    return result
+
+
+def _center_distance(rect, hwnd: int) -> int:
+    window = wintypes.RECT()
+    _user32.GetWindowRect(hwnd, ctypes.byref(window))
+    return (abs((rect.left + rect.right) - (window.left + window.right)) // 2
+            + abs((rect.top + rect.bottom) - (window.top + window.bottom)) // 2)
+
+
+def _best(uia, ua, roots: list[int], query: list[str]) -> tuple[list[tuple], list[str]]:
+    """Подходящие надписи из окон roots, лучшие первыми: (очки, кнопка, надпись, элемент, прямоугольник, окно),
+    и все надписи кнопок - для лога. При равных очках кнопка раньше текста, меню раньше окна,
+    а из одинаковых надписей - та, что ближе к середине окна: туда человек и смотрит."""
+    scored, names = [], []
+    for order, hwnd in enumerate(roots):
+        for name, control, element, rect in _candidates(uia, ua, hwnd):
+            if control:
+                names.append(name)
+            score = match_score(query, words(name), control)
+            if score:
+                key = (score, control, -order, -_center_distance(rect, hwnd))
+                scored.append((key, (score, control, name, element, rect, order)))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [found for _, found in scored], names
+
+
+def _ambiguous(found: list[tuple]) -> bool:
+    """Неточное совпадение («закрыть вкладку» - «Закрыть 1 вкладку» на каждой вкладке) у нескольких
+    одинаково подходящих - не угадываю."""
+    if len(found) < 2:
+        return False
+    (score, control, _, _, _, order), (score2, control2, _, _, _, order2) = found[0], found[1]
+    return score < 3 and (score, control, order) == (score2, control2, order2)
+
+
+def _mouse_click(rect) -> None:
+    """Щелчок мышью в середину элемента, потом курсор возвращаю на место."""
+    old = wintypes.POINT()
+    _user32.GetCursorPos(ctypes.byref(old))
+    _user32.SetCursorPos((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
+    _user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    _user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+    time.sleep(0.05)
+    _user32.SetCursorPos(old.x, old.y)
+
+
+# Как элемент «нажимается» без мыши, по порядку: кнопка и ссылка, флажок, вкладка и пункт списка,
+# раскрывающийся список и меню. «Действие по умолчанию» (LegacyIAccessible) не беру: у текста и пунктов
+# списка на странице оно часто ничего не делает, а Харви сказала бы «нажала» - лучше честно мышью
+_PRESS = (("Invoke", "Invoke"), ("Toggle", "Toggle"), ("SelectionItem", "Select"), ("ExpandCollapse", "Expand"))
+
+
+def _press_element(ua, element, rect, control: bool) -> str:
+    """Нажимает элемент: через UI Automation, а если он этого не умеет (простой текст) - мышью."""
+    if control:
+        for pattern, method in _PRESS:
+            try:
+                found = element.GetCurrentPattern(getattr(ua, f"UIA_{pattern}PatternId"))
+                if found:
+                    getattr(found.QueryInterface(getattr(ua, f"IUIAutomation{pattern}Pattern")), method)()
+                    return pattern
+            except Exception:                 # шаблон есть, но не сработал - пробую следующий
+                continue
+    _mouse_click(rect)
+    return "мышь"
+
+
+def _click(query: list[str]) -> str | None:
+    """Надпись нажатого элемента; "" - подходят несколько, None - ничего не нашла."""
+    import comtypes.client
+
+    ua = _uia()
+    uia = comtypes.client.CreateObject(ua.CUIAutomation, interface=ua.IUIAutomation)
+    fg = _user32.GetForegroundWindow()
+    if not fg:
+        return None
+    roots = _popups(fg) + [fg]
+    deadline = time.time() + _LAZY_WAIT
+    found, names = _best(uia, ua, roots, query)
+    while not found and _class_of(fg).startswith(_LAZY_CLASSES) and time.time() < deadline:
+        time.sleep(0.4)
+        found, names = _best(uia, ua, roots, query)
+    said = " ".join(query)
+    if not found:
+        log("Нажатие", f"не нашла {said!r}; есть: {', '.join(n[:30] for n in names[:15]) or 'ничего'}")
+        return None
+    if _ambiguous(found):
+        log("Нажатие", f"{said!r}: несколько похожих - {', '.join(f[2][:30] for f in found[:5])}")
+        return ""
+    score, control, name, element, rect, _ = found[0]
+    how = _press_element(ua, element, rect, control)
+    log("Нажатие", f"{said!r} → «{name[:60]}» (совпадение {score:.2f}, {how})")
+    return name
+
+
+def click(name: str) -> str:
+    """«Нажми подписаться», «кликни на настройки»: ищет надпись в активном окне и в его открытом меню -
+    кнопку, ссылку, пункт меню, вкладку или просто текст - и нажимает."""
+    query = words(name)
+    if not query:
+        return f"{FAIL}не понял{END}, что нажать"
+    with _DpiAware():                         # координаты для мыши - в настоящих пикселях
+        pressed = _with_com(_click, query)
+    if pressed == "":
+        return f"{AMBIGUOUS} «{name}», скажите точнее"
+    if not pressed:
+        return f"{NOT_FOUND} «{name}»"
+    return f"нажал{END} «{_HOTKEY_RE.sub('', pressed)[:40]}»"

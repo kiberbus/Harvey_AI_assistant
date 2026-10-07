@@ -322,6 +322,27 @@ PHRASE_CASES = [
     ("пятьдесят тысяч рублей кинги", [("calculate", {"text": "пятьдесят тысяч рублей в тенге"})]),
     ("астрой клауд", [("open_app", {"name": "клауд"})]),
     ("верни трек", [(M, {"action": "previous", "target": "music"})]),   # «верни X» - только приложения
+
+    # «нажми X» - найти надпись на экране и нажать
+    ("нажми подписаться", [("click", {"name": "подписаться"})]),
+    ("нажми на кнопку войти", [("click", {"name": "войти"})]),
+    ("нажми кнопку «далее»", [("click", {"name": "далее"})]),
+    ("кликни на настройки", [("click", {"name": "настройки"})]),
+    ("щёлкни по ссылке скачать", [("click", {"name": "скачать"})]),
+    ("нажми, ок", [("click", {"name": "ок"})]),
+    ("нажми принять и продолжить", [("click", {"name": "принять и продолжить"})]),   # одна кнопка
+    ("нажми ок и закрой телеграм", [("click", {"name": "ок"}), ("close_app", {"name": "телеграм"})]),
+    ("открой телеграм и нажми поиск", [("open_app", {"name": "телеграм"}), ("click", {"name": "поиск"})]),
+    ("нажми выход", [("click", {"name": "выход"})]),                   # кнопка, а не выключение Харви
+    ("нажми спящий режим", [("click", {"name": "спящий режим"})]),     # кнопка в «Пуске», а не сон Харви
+    ("нажми следующий трек", [("click", {"name": "следующий трек"})]),  # нет на экране - трек, см. ниже
+    # а это не надписи на экране: клавиши, лайк и плеер - как раньше
+    ("нажми пробел", [("shortcut", {"action": "space"})]),
+    ("нажми паузу", [(M, {"action": "pause"})]),
+    ("нажми на паузу", [(M, {"action": "pause"})]),
+    ("нажми плей", [(M, {"action": "play"})]),
+    ("нажми play", [(M, {"action": "play"})]),
+    ("нажми лайк", [("rate_track", {"action": "like"})]),
 ]
 
 
@@ -435,6 +456,78 @@ def test_scene_runs_steps_in_order(calls, monkeypatch):
         assert calls == [("open_app", {"name": "claude"}), ("set_volume", {"level": 30})]
         assert results[-1].startswith(util.FAIL) and "сделай что-нибудь" in results[-1]
     assert parse.parse_all("рабочий") is None
+
+
+@pytest.mark.parametrize("phrase,missed,then", [
+    ("нажми сохранить", "NOT_FOUND", ("shortcut", {"action": "save"})),
+    ("нажми следующий трек", "NOT_FOUND", (M, {"action": "next", "target": "music"})),
+    ("нажми закрыть вкладку", "AMBIGUOUS", ("close_tab", {"which": "current"})),   # крестик на каждой вкладке
+])
+def test_click_falls_back_to_command(monkeypatch, phrase, missed, then):
+    """На экране такой надписи нет (или их несколько) - выполняю то, что значит фраза без «нажми»."""
+    from core import parse, tools, uia
+    recorded = []
+
+    def fake(name, args):
+        recorded.append((name, dict(args)))
+        return f"{getattr(uia, missed)} «x»" if name == "click" else "ok"
+
+    monkeypatch.setattr(tools, "execute_tool", fake)
+    [action] = parse.parse_all(phrase)
+    assert action() == "ok"
+    assert recorded[1:] == [then]
+
+
+def test_click_without_fallback_says_not_found(monkeypatch):
+    from core import parse, tools, uia
+    monkeypatch.setattr(tools, "execute_tool", lambda name, args: f"{uia.NOT_FOUND} «подписаться»")
+    [action] = parse.parse_all("нажми подписаться")
+    assert action().startswith(uia.NOT_FOUND)
+
+
+def test_click_exit_button_does_not_exit(calls, monkeypatch):
+    """«Нажми выход» - кнопка на экране; раньше на слово «выход» Харви выключилась бы."""
+    from core import commands
+    monkeypatch.setattr(commands, "_history", commands.deque(maxlen=5))
+    monkeypatch.setattr(commands, "_say", lambda text, user=None: None)
+    monkeypatch.setattr(commands, "play_sound", lambda name: None)
+    assert commands.handle_command("нажми выход") is True
+    assert calls == [("click", {"name": "выход"})]
+
+
+def test_click_is_not_quick_command():
+    """«Нажми под…» после короткой паузы не выполняю: надпись могут ещё договаривать."""
+    from core import parse
+    assert not parse.is_quick_command("Харви, нажми подписаться")
+    assert parse.is_quick_command("Харви, нажми паузу")
+
+
+@pytest.mark.parametrize("said,shown,control,score", [
+    ("подписаться", "Подписаться", True, 4),
+    ("корзину", "Корзина", True, 4),                          # падеж: «нажми на корзину»
+    ("ютуб", "YouTube", True, 4),                             # латиница по-русски
+    ("пауза", "Пауза (k)", True, 4),                          # подсказка с клавишей не мешает
+    ("подписаться", "Подписаться на канал «Вася»", True, 3),
+    ("настройки", "Открыть настройки", True, 2),
+    ("пропустить рекламу", "Пропустить", True, 1),
+    ("войти", "Как войти в аккаунт, если забыл пароль", True, 0),   # длинная ссылка, слово в середине
+    ("войти", "Войти", False, 4),                             # простой текст - только целиком
+    ("войти", "Нажмите здесь, чтобы войти", False, 0),
+])
+def test_click_match_score(said, shown, control, score):
+    from core import uia
+    assert uia.match_score(uia.words(said), uia.words(shown), control) == score
+
+
+def test_click_misheard_and_ambiguous():
+    from core import uia
+    near = uia.match_score(uia.words("закрыть вкладку"), uia.words("Закрыть 1 вкладку"))
+    assert 0 < near < 1
+    tab = (near, True, "Закрыть 1 вкладку", None, None, 0)
+    exact = (4, True, "Ответить", None, None, 0)
+    assert uia._ambiguous([tab, tab])                         # неточное у нескольких - не угадываю
+    assert not uia._ambiguous([exact, exact])                 # точное - ближайшее к середине окна
+    assert not uia._ambiguous([tab])
 
 
 def test_scene_calling_itself_does_not_loop(calls, monkeypatch):

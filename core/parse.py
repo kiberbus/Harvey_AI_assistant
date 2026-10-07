@@ -27,6 +27,8 @@ from phrases import (
     CAL_EVENT_ADD,
     CAL_EVENT_DELETE,
     CAL_NEXT,
+    CLICK,
+    CLICK_NOT_NAME,
     CURRENCY_WORDS,
     DRIVE_LETTERS,
     FOLDER_ALIASES,
@@ -101,6 +103,9 @@ from core import tools
 from core.audio import (  # noqa: F401
     device_alias,
 )
+from core.uia import (  # noqa: F401
+    MISSED,
+)
 
 
 def _currency_codes(seg: str) -> list[str]:
@@ -147,6 +152,49 @@ def parse_side_by_side(low: str) -> Callable[[], str] | None:
     return None
 
 
+CLICK_RE = re.compile(CLICK)
+CLICK_NOT_NAME_RE = re.compile(CLICK_NOT_NAME)
+_INFINITIVE_RE = re.compile(r"^\w+(?:ть|ться|ти|чь)(?:\s|$)")
+
+
+def click_target(seg: str) -> str | None:
+    """Что нажать на экране: «нажми на кнопку войти» → «войти». None - фраза не про надпись на экране
+    («нажми паузу» - это плеер)."""
+    m = CLICK_RE.match(seg)
+    if not m:
+        return None
+    name = m.group("name").strip(PUNCT + "«»\"'")
+    return name if name and not CLICK_NOT_NAME_RE.match(name) else None
+
+
+def parse_click(seg: str) -> Callable[[], str] | None:
+    """«Нажми подписаться», «кликни на настройки»: Харви ищет надпись в активном окне и нажимает.
+    Если на экране такого нет, а без «нажми» фраза - обычная команда («нажми сохранить» - Ctrl+S,
+    «нажми следующий трек»), выполняю её: так эти фразы работают, как и раньше."""
+    name = click_target(seg)
+    if name is None:
+        return None
+    fallback = parse_local(name)
+
+    def act() -> str:
+        result = tools.execute_tool("click", {"name": name})
+        return fallback() if fallback and result.startswith(MISSED) else result
+
+    act.click = True                    # is_quick_command: надпись могут ещё не договорить
+    return act
+
+
+def _whole_click(low: str) -> Callable[[], str] | None:
+    """«Нажми принять и продолжить» - одна кнопка, а не две команды: после «и» неопределённая форма,
+    как в надписях на кнопках. «Нажми ок и закрой телеграм» - две команды."""
+    name = click_target(low)
+    if name is None or not SPLIT_RE.search(name):
+        return None
+    if all(_INFINITIVE_RE.match(part) for part in SPLIT_RE.split(name)[1:]):
+        return parse_click(low)
+    return None
+
+
 def parse_local(segment: str) -> Callable[[], str] | None:
     """Разбирает одну простую команду. None - нужен ИИ."""
     seg = segment.strip(PUNCT)
@@ -169,8 +217,8 @@ def parse_local(segment: str) -> Callable[[], str] | None:
         if R[key].search(seg):
             return lambda a=action: tools.execute_tool("request_power", {"action": a})
 
-    # Сон самой Харви
-    if R["sleep_mode"].search(seg):
+    # Сон самой Харви. «Нажми спящий режим» - сначала кнопка на экране (меню «Пуск»)
+    if R["sleep_mode"].search(seg) and not click_target(seg):
         return lambda: tools.execute_tool("sleep_mode", {})
 
     # Игровой режим - раньше «включи X» (приложение) и медиа. «Выключи» раньше: «игровой режим» есть в обоих
@@ -202,6 +250,12 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     for action, rx in SHORTCUT_RES:
         if rx.search(seg):
             return lambda a=action: tools.execute_tool("shortcut", {"action": a})
+
+    # «Нажми подписаться» - надпись на экране. После клавиш («нажми enter») и лайка, раньше медиа и «открой X»:
+    # они сработают, только если на экране такого нет
+    click_action = parse_click(seg)
+    if click_action:
+        return click_action
 
     output_action = parse_audio_output(seg)     # «включи звук в наушниках» - не «включи звук»
     if output_action:
@@ -953,8 +1007,9 @@ def is_quick_command(text: str, need_name: bool = True, pending: bool = False) -
         return True
     if SILENCE_RE.match(body) or STOP_RE.match(body):
         return True
-    if parse_all(body) is None:
-        return False
+    actions = parse_all(body)
+    if actions is None or any(getattr(action, "click", False) for action in actions):
+        return False                    # «нажми под…» - надпись ещё договаривают
     if parse_media(body) or parse_app_volume(body) or parse_audio_output(body):
         return True
     if any(rx.search(body) for _, rx in SHORTCUT_RES) or FORWARD_OR_NEXT_RE.match(body):
@@ -988,6 +1043,9 @@ def parse_all(low: str, scenes: bool = True) -> list[Callable[[], str]] | None:
     tab_action = parse_browser(low)                     # «назад», «закрой вкладку ютуб» - до медиа и поиска
     if tab_action:
         return [tab_action]
+    click = _whole_click(low)                           # «нажми принять и продолжить» - одна кнопка
+    if click:
+        return [click]
     if any(rx.search(low) for _, rx in SHORTCUT_RES):
         return [parse_local(low)]                       # «назад в браузере», «следующая вкладка»
     if MUSIC_APP_RE.fullmatch(low):                     # «запусти яндекс музыку» - открыть и сразу включить
