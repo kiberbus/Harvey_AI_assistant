@@ -65,6 +65,7 @@ TTS_CACHE_MAX = 200
 _inflight = 0                  # фраз/звуков в очереди, в синтезе или в динамиках
 _inflight_lock = threading.Lock()
 _speaking = threading.Event()   # пока set - микрофон «глохнет», чтобы не слушать саму себя
+_interrupt = threading.Event()  # stop_speaking просит замолчать, а звук останавливает сам _play_worker
 
 
 def _ensure_piper() -> None:
@@ -462,9 +463,10 @@ def play_beep() -> None:
     if _chimes.play(_WAKE_SOUND):
         time.sleep(len(_WAKE_SOUND) / SOUND_RATE * 0.6)   # ждём основную часть: дальше выбросим её эхо
         return
-    try:
-        sd.play(_WAKE_SOUND, samplerate=SOUND_RATE, device=_output_index("MME") if _output_name else None)
-        sd.wait()
+    try:   # свой поток, а не sd.play: общий принадлежит _play_worker (см. _play)
+        with sd.OutputStream(samplerate=SOUND_RATE, channels=1, dtype="float32",
+                             device=_output_index("MME") if _output_name else None) as stream:
+            stream.write(_WAKE_SOUND)
     except Exception:
         pass
 
@@ -522,13 +524,28 @@ def _synth_worker() -> None:
             _item_done()
 
 
+def _play(samples: np.ndarray, rate: int) -> None:
+    """Играет до конца или до stop_speaking. sounddevice не потокобезопасен: sd.stop() из главного потока
+    в тот миг, когда sd.wait() здесь закрывал тот же поток вывода, обращался к освобождённой памяти,
+    и Харви падала целиком (access violation в crash.log, когда её перебивали в конце фразы).
+    Поэтому общий поток sounddevice открываю, жду и закрываю только в этом потоке."""
+    sd.play(samples, samplerate=rate, device=_output_index("MME") if _output_name else None)
+    stream = sd.get_stream()
+    try:
+        while stream.active and not _interrupt.wait(0.02):
+            pass
+    finally:
+        stream.abort()                      # перебили - обрываю сразу, а не доигрываю буфер (stop ждёт его)
+        sd.stop()
+
+
 def _play_worker() -> None:
     while True:
         (samples, rate), gen = _play_queue.get()
+        _interrupt.clear()                  # до проверки поколения: stop_speaking после неё всё равно остановит
         try:
             if gen == _tts_gen:
-                sd.play(samples, samplerate=rate, device=_output_index("MME") if _output_name else None)
-                sd.wait()
+                _play(samples, rate)
         except Exception as e:
             log("TTS", f"Ошибка воспроизведения: {e}")
         finally:
@@ -549,10 +566,7 @@ def stop_speaking() -> None:
     global _tts_gen
     _tts_gen += 1
     _item_done(_drop_queued(_tts_queue) + _drop_queued(_play_queue), tail=False)
-    try:
-        sd.stop()
-    except Exception:
-        pass
+    _interrupt.set()                        # sd.stop() отсюда ронял Харви - останавливает _play в своём потоке
     _speaking.clear()
 
 

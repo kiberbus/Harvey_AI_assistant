@@ -364,8 +364,9 @@ def _rms(block: np.ndarray) -> float:
 
 
 def calibrate_silence(duration: float = 0.5) -> float:
-    recording = sd.rec(int(duration * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=1, dtype="float32")
-    sd.wait()
+    # Свой поток, а не sd.rec: тот закрывает общий поток sounddevice, в который может говорить напоминание
+    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32") as stream:
+        recording, _overflow = stream.read(int(duration * SAMPLE_RATE))
     return max(0.005, min(0.02, _rms(recording.flatten()) * 1.8))
 
 

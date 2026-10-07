@@ -366,6 +366,44 @@ def test_night_is_quieter_and_urgent_does_not_clip():
     assert speech._apply_volume(audio, None) is audio
 
 
+class _FakeSounddevice:
+    """Записывает обращения к sounddevice. active - играет ли ещё фраза."""
+
+    def __init__(self, active: bool) -> None:
+        self.calls: list[str] = []
+        self.active = active
+
+    def play(self, *args, **kwargs):
+        self.calls.append("play")
+
+    def get_stream(self):
+        return self
+
+    def abort(self):
+        self.calls.append("abort")
+
+    def stop(self):
+        self.calls.append("stop")
+
+
+def test_stop_speaking_does_not_touch_sounddevice(monkeypatch):
+    """7 октября: sd.stop() из главного потока, пока поток речи закрывал звук, ронял Харви (access violation)."""
+    fake = _FakeSounddevice(active=True)
+    monkeypatch.setattr(speech, "sd", fake)
+    speech.stop_speaking()
+    assert fake.calls == [] and speech._interrupt.is_set()
+    speech._play(speech.np.zeros(10, dtype="float32"), 16000)    # поток речи сам видит просьбу и замолкает
+    assert fake.calls == ["play", "abort", "stop"]
+    speech._interrupt.clear()
+
+
+def test_play_closes_sound_after_phrase(monkeypatch):
+    fake = _FakeSounddevice(active=False)
+    monkeypatch.setattr(speech, "sd", fake)
+    speech._play(speech.np.zeros(10, dtype="float32"), 16000)
+    assert fake.calls == ["play", "abort", "stop"]
+
+
 @pytest.mark.parametrize("text,joke", [
     ("расскажи анекдот", True), ("пошути", True), ("расскажи что-нибудь смешное", True),
     ("расскажи про погоду", False),
