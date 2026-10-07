@@ -12,6 +12,7 @@ from typing import Callable
 from config import (
     ASSISTANT_NAME,
     DIALOG_LOCAL_ONLY,
+    DIALOG_MAX_WORDS,
     KEEP_ALIVE,
     LLM_STREAM,
     MEMORY_TTL,
@@ -50,6 +51,7 @@ from core.daily import (  # noqa: F401
 from core.parse import (
     fix_hearing,
     parse_all,
+    parse_answer,
 )
 from core.tools import (
     TOOLS,
@@ -219,6 +221,22 @@ def _reply(phrases: list[str], user: str | None = None) -> None:
         _say(text)
 
 
+# «Харви, открой» - «Что открыть?» - «Obsidian». Из лога: ответ без имени не брала, с именем отдавала ИИ (6 с)
+_QUESTION_VERBS = {"Что открыть?": "открой", "Что закрыть?": "закрой"}
+_ANSWER_SEC = 20
+
+
+def _answer_actions(low: str) -> list[Callable[[], str]] | None:
+    """Если последней репликой Харви спросила «Что открыть?», low - название из ответа."""
+    if not _history:
+        return None
+    stamp, _user, reply = _history[-1]
+    verb = _QUESTION_VERBS.get(reply)
+    if verb is None or time.time() - stamp > _ANSWER_SEC:
+        return None
+    return parse_answer(verb, low)
+
+
 def dialog_accepts(command: str) -> bool:
     """Фраза без имени в окне диалога: беру, только если это явно команда."""
     stripped = command.strip().lstrip(PUNCT)
@@ -227,9 +245,12 @@ def dialog_accepts(command: str) -> bool:
         return False
     if DICTATE_RE.match(stripped) or any(p.match(stripped) for p in NOTE_ADD_RE) or REPEAT_RE.match(low):
         return True
-    if smart.parse(fix_hearing(low)) is not None:
+    if smart.parse(fix_hearing(low)) is not None or _answer_actions(low) is not None:
         return True
-    return not DIALOG_LOCAL_ONLY or parse_all(low) is not None
+    if not DIALOG_LOCAL_ONLY:
+        return True
+    # Длинное - скорее разговор в комнате: «можешь макбук дальше посмотреть» переключало трек (из лога)
+    return len(low.split()) <= DIALOG_MAX_WORDS and parse_all(low) is not None
 
 
 def handle_command(command: str) -> bool:
@@ -271,8 +292,9 @@ def handle_command(command: str) -> bool:
         play_sound("cancel")
         return True
 
-    # Всё, что понимают правила (включая цепочки "тише и пауза"), выполняю без ИИ
-    actions = parse_all(low)
+    # Всё, что понимают правила (включая цепочки "тише и пауза"), выполняю без ИИ.
+    # Ответ на «Что закрыть?» - раньше: «телеграм» после него - закрыть, а не открыть
+    actions = _answer_actions(low) or parse_all(low)
     if actions:
         log("Без ИИ", low)
         _reply([a() for a in actions], low)

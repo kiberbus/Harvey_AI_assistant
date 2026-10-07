@@ -227,6 +227,8 @@ def parse_local(segment: str) -> Callable[[], str] | None:
 
     if R["show_desktop"].search(seg):
         return lambda: tools.execute_tool("show_desktop", {})
+    if R["restore_windows"].search(seg):
+        return lambda: tools.execute_tool("restore_windows", {})
     if R["minimize"].search(seg):
         return lambda: tools.execute_tool("window_state", {"action": "minimize"})
     if R["maximize"].search(seg):
@@ -249,12 +251,18 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if m:
         target = m.group(1).strip()
         return lambda: tools.execute_tool("minimize_app", {"name": target})
+    # «Разверни» - как кнопка «Развернуть» в Windows: на весь экран. Из лога: после «telegram и браузер рядом»
+    # «разверни браузер» только показывал окно на половине экрана
     m = re.match(r"(?:разверни|развернуть)\s+(?:приложение\s+|программу\s+|окно\s+)?(.+)$", seg)
     if m and (m.group(1).strip() in APP_ALIASES or find_app(m.group(1).strip())):
-        target = m.group(1).strip()
-        return lambda: tools.execute_tool("open_app", {"name": target})      # уже запущено - развернёт окно
+        return lambda t=m.group(1).strip(): _open_maximized(t)
+    m = re.match(r"верни\s+(.+)$", seg)       # «верни стим» после «сверни стим» - показать окно как было
+    if m and m.group(1).strip() in APP_ALIASES:
+        return lambda t=m.group(1).strip(): tools.execute_tool("open_app", {"name": t})
 
-    m = re.fullmatch(r"(?:(?:разверни|открой|сделай)\s+)?(.+?)\s+(?:на весь экран|на полный экран|во весь экран)", seg)
+    # «Браузер, полный экран», «браузер вверх» (как Win+↑) - из лога, уходило в ИИ
+    m = re.fullmatch(r"(?:(?:разверни|открой|сделай)\s+)?(.+?),?\s+(?:на весь экран|на полный экран|во весь экран|"
+                     r"в полный экран|полный экран|вверх|наверх)", seg)
     if m and (m.group(1) in APP_ALIASES or find_app(m.group(1))):
         return lambda t=m.group(1): _open_maximized(t)
 
@@ -526,14 +534,17 @@ def _any(patterns: list[str]) -> re.Pattern:
 
 
 _CAL_DAY_RE = re.compile(r"(?:\b(?:на|в|во|до|к|ко|с|со)\s+)?\b(?P<day>" + CAL_DAY + r")\b")
-_CAL_AT_RE = re.compile(r"\b(?:в|во|на|к|до|с|со)\s+" + _CLOCK)
+# «в 15:00», а промежуток можно и без предлога: «красным цветом 17.00 до 17.30» (из лога)
+_CAL_AT_RE = re.compile(r"(?:\b(?:в|во|на|к|до|с|со)\s+|(?<![\d.:])(?=\d{1,2}[:.]\d{2}\s*(?:до|-)\s*\d))" + _CLOCK)
 _CAL_UNTIL_RE = re.compile(r"\s*(?:до|по|-)\s*" + _CLOCK)        # «с 15 до 17» - конец встречи
 _CAL_DURATION_RE = re.compile(
     r"\b(?:на|длительностью|продолжительностью)\s+(?P<d>полчаса|полтора\s+часа|час|"
     r"\d+\s*(?:час\w*|минут\w*)(?:\s*(?:и\s+)?\d+\s*минут\w*)?)(?!\s*(?:утра|дня|вечера|ночи|\d))")
 _CAL_ALL_DAY_RE = re.compile(r"\b(?:на\s+)?(?:весь|целый)\s+день\b")
 _CAL_IN_CALENDAR_RE = re.compile(r"[\s,]*\b(?:в|во)\s+(?:мой\s+)?календар\w*")
-_CAL_COLOR_RES = [(key, re.compile(r"(?:\b(?:в\s+)?цвет\w*\s+)?\b" + stem + r"(?:\s+цвет\w*)?"))
+# «пометь её красным цветом» - глагол тоже убираю, иначе он попадёт в название
+_CAL_COLOR_RES = [(key, re.compile(r"(?:\b(?:пометь|отметь|выдели|покрась|сделай)\s+(?:(?:ее|его)\s+)?)?"
+                                   r"(?:\b(?:в\s+)?цвет\w*\s+)?\b" + stem + r"(?:\s+цвет\w*)?"))
                   for key, stem in CAL_COLORS.items()]
 _CAL_AGENDA_RE = _any(CAL_AGENDA)
 _CAL_NEXT_RE = _any(CAL_NEXT)
@@ -551,10 +562,18 @@ _EVENT_NOUNS = {"встреч": "Встреча", "созвон": "Созвон"
 
 
 def _cal_date(word: str, today: date) -> date | None:
-    """«завтра», «следующую пятницу», «7 октября» -> дата. Прошедшее число - следующего года."""
+    """«завтра», «следующую пятницу», «7 октября», «07.10.26» -> дата. Прошедшее число без года -
+    следующего года."""
     shift = {"сегодня": 0, "завтра": 1, "послезавтра": 2}.get(word)
     if shift is not None:
         return today + timedelta(days=shift)
+    m = re.match(r"(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})\b", word)
+    if m:
+        year = int(m.group(3)) + (2000 if len(m.group(3)) == 2 else 0)
+        try:
+            return date(year, int(m.group(2)), int(m.group(1)))
+        except ValueError:                     # «31.09.26»
+            return None
     m = re.match(r"(\d{1,2})\D*?\s+(\w+)$", word)
     if m:
         month = next(i + 1 for i, stem in enumerate(_MONTH_STEMS) if m.group(2).startswith(stem))
@@ -648,7 +667,7 @@ def _parse_event_add(low: str) -> Callable[[], str] | None:
     m = _CAL_EVENT_ADD_RE.match(low)
     if not m or not (m.group("verb") or low.startswith("нов")):
         return None
-    rest = m.group("rest")
+    rest = (m.group("pre") or "") + m.group("rest")        # «добавь на среду встречу …» - день до слова-события
     in_calendar = m.group("cal") or _CAL_IN_CALENDAR_RE.search(rest)
     if not (m.group("noun") or in_calendar):
         return None                            # «поставь лайк», «запиши хлеб» - не календарь
@@ -968,3 +987,12 @@ def parse_all(low: str) -> list[Callable[[], str]] | None:
             last_verb = verb.group(1)
             last_target = segment[verb.end():].strip(PUNCT) or last_target
     return actions or None
+
+
+def parse_answer(verb: str, answer: str) -> list[Callable[[], str]] | None:
+    """Ответ на «Что открыть?»: «obsidian» - то же, что «открой obsidian». Ответом считаю только название:
+    «ничего» или новая команда со своим глаголом - не ответ."""
+    answer = fix_hearing(answer.strip(PUNCT))
+    if VERB_RE.match(answer) or not (_bare_name(answer) or _known_app(answer)):
+        return None
+    return parse_all(f"{verb} {answer}")

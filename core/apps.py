@@ -548,6 +548,15 @@ def show_desktop() -> str:
     return f"свернул{END} все окна"
 
 
+def restore_windows() -> str:
+    """«Разверни все окна». Второй Win+D не годится: если после «сверни все окна» что-то открывали,
+    он свернёт всё снова, поэтому разворачиваю свёрнутые окна сама."""
+    minimized = [hwnd for hwnd, _title, _cls, pid in _top_windows() if pid != OWN_PID and _user32.IsIconic(hwnd)]
+    for hwnd in reversed(minimized):        # снизу вверх: верхнее окно останется сверху
+        _user32.ShowWindow(hwnd, SW_RESTORE)
+    return f"развернул{END} все окна" if minimized else f"{INFO}свёрнутых окон нет"
+
+
 def alt_tab() -> str:
     _chord(VK_MENU, VK_TAB)
     return f"переключил{END} окно"

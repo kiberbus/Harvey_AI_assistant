@@ -44,6 +44,13 @@ def _on(day: date, hour: int, minute: int = 0) -> str:
     ("добавь событие день рождения мамы на весь день завтра", {"title": "День рождения мамы", "start": TOMORROW.isoformat()}),
     ("запиши встречу завтра в 18", {"title": "Встреча", "start": _on(TOMORROW, 18)}),
     ("новая встреча завтра в 12 с Алёной", {"title": "Встреча с алёной", "start": _on(TOMORROW, 12)}),
+    # из лога: день до слова «встречу», «пометь её», дата цифрами и время без предлога
+    ("добавь на завтра встречу с 17.00 до 17.30, пометь её красным цветом",
+     {"title": "Встреча", "start": _on(TOMORROW, 17), "duration_min": 30, "color": "red"}),
+    ("добавь на среду встречу в 10", {"title": "Встреча", "start": _on(_next_weekday(2), 10)}),
+    (f"добавь встречу на {TOMORROW:%d.%m.%y} года, помите её красным цветом 17.00 до 17.30",
+     {"title": "Встреча", "start": _on(TOMORROW, 17), "duration_min": 30, "color": "red"}),
+    (f"добавь встречу на {TOMORROW:%d.%m.%Y} в 9 утра", {"title": "Встреча", "start": _on(TOMORROW, 9)}),
 ])
 def test_event_add(run, phrase, args):
     assert run(phrase) == [("calendar_add_event", args)]
@@ -80,6 +87,7 @@ def test_event_today_time_passed_goes_to_tomorrow(run):
     ("мои встречи на сегодня", TODAY),
     ("есть ли у меня встречи завтра", TOMORROW),
     ("я свободна в субботу", _next_weekday(5)),
+    (f"что у меня на {TOMORROW:%d.%m.%y}", TOMORROW),
 ])
 def test_agenda(run, phrase, day):
     assert run(phrase) == [("calendar_agenda", {"day": day.isoformat()})]

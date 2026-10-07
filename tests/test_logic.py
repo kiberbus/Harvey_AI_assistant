@@ -136,9 +136,17 @@ def test_reminder_without_time_asks_when(calls):
 @pytest.mark.parametrize("text,accepted", [
     ("Пауза.", True), ("Следующий трек", True), ("Запиши привет", True),
     ("ну мы вчера ходили в кино", False),
+    ("Отлично, сверни Яндекс Музыку.", True),                                       # из лога: не брала
+    ("На, тогда унеси это. Можешь макбук дальше посмотреть, если хочешь.", False),  # из лога: листала трек
 ])
 def test_dialog_accepts(text, accepted):
     assert commands.dialog_accepts(text) is accepted
+
+
+def test_whisper_series_hallucination_is_noise():
+    from core import stt
+    assert stt.is_noise("смотрите продолжение в следующей серии.")    # из лога: переключало трек
+    assert not stt.is_noise("следующая серия")
 
 
 @pytest.mark.parametrize("text,ends", [("всё спасибо", True), ("спасибо", True), ("пауза", False)])
@@ -328,6 +336,18 @@ def test_folder_and_site_names():
     assert apps._folder_names("телеграм") is None
     assert apps._site_keywords("ютуб") == {"ютуб", "youtube"}
     assert apps._site_keywords("телеграм") == set()
+
+
+@pytest.mark.parametrize("spoken,title,found", [
+    ("google календарем", "Google Календарь - среда, 7 октября 2026, сегодня", True),   # из лога: «вкладки нет»
+    ("гитхабом", "GitHub", True),
+    ("яндекс музыкой", "Яндекс Музыка — собираем музыку для вас", True),
+    ("почтой", "YouTube", False),
+])
+def test_tab_name_in_any_case(spoken, title, found):
+    from types import SimpleNamespace
+    from core import browser
+    assert browser._matches(SimpleNamespace(title=title), browser._keywords(spoken)) is found
 
 
 @pytest.mark.parametrize("spoken,exe", [("диспетчер задачи", "taskmgr.exe"), ("телеграмма", "telegram.exe")])

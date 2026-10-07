@@ -276,6 +276,25 @@ PHRASE_CASES = [
     ("открой астана хаб", [("open_browser", {"site": "astanahub"})]),
     ("степик", [("open_browser", {"site": "stepik"})]),
     ("открой", ["=Что открыть?"]),
+    ("суверин браузер", [("minimize_app", {"name": "браузер"})]),
+    ("сырни яндекс музыку", [("minimize_app", {"name": "яндекс музыку"})]),
+    ("сырний браузер", [("minimize_app", {"name": "браузер"})]),
+    ("середине все окна", [("show_desktop", {})]),
+    ("отлично, сверни яндекс музыку", [("minimize_app", {"name": "яндекс музыку"})]),
+    ("разверни все окна", [("restore_windows", {})]),
+    ("верни стим", [("open_app", {"name": "стим"})]),
+    ("браузер, полный экран", [("open_app", {"name": "браузер"})]),     # + развернуть, см. test_unfold_maximizes
+    ("браузер полный грант", [("open_app", {"name": "браузер"})]),
+    ("браузер вверх", [("open_app", {"name": "браузер"})]),
+    ("скопирую ссылку сайта", [("copy_link", {})]),
+    ("скопируй ссылку с сайта", [("copy_link", {})]),
+    ("закрой вкладку с google календарем", [("close_tab", {"which": "name", "name": "google календарем"})]),
+    ("добавь песню «нравится»", [("rate_track", {"action": "like"})]),
+    ("предыдущие действия", [("undo", {})]),                            # переключало трек
+    ("пятьдесят тысяч рублей в деньге", [("calculate", {"text": "пятьдесят тысяч рублей в тенге"})]),
+    ("пятьдесят тысяч рублей кинги", [("calculate", {"text": "пятьдесят тысяч рублей в тенге"})]),
+    ("астрой клауд", [("open_app", {"name": "клауд"})]),
+    ("верни трек", [(M, {"action": "previous", "target": "music"})]),   # «верни X» - только приложения
 ]
 
 
@@ -335,6 +354,33 @@ def test_cancel_does_nothing(calls, monkeypatch, phrase):
     monkeypatch.setattr(commands, "play_sound", sounds.append)
     assert commands.handle_command(phrase) is True
     assert calls == [] and sounds == ["cancel"]
+
+
+def test_unfold_maximizes(calls, monkeypatch):
+    """Из лога: после «telegram и браузер рядом» «разверни браузер» оставлял окно на половине экрана."""
+    from core import parse, tools
+    monkeypatch.setattr(tools, "execute_tool", lambda name, args: calls.append((name, dict(args))) or "показала Firefox")
+    monkeypatch.setattr(parse.time, "sleep", lambda seconds: None)
+    for phrase in ("разверни браузер", "браузер полный экран", "браузер вверх"):
+        calls.clear()
+        [action] = parse.parse_all(phrase)
+        action()
+        assert calls == [("open_app", {"name": "браузер"}), ("window_state", {"action": "maximize"})], phrase
+
+
+def test_answer_to_question(calls, monkeypatch):
+    """«Открой» - «Что открыть?» - «Claude». Из лога: ответ без имени не брала, с именем отдавала ИИ."""
+    from core import browser, commands
+    monkeypatch.setattr(commands, "_history", commands.deque(maxlen=5))
+    monkeypatch.setattr(commands, "_say", lambda text, user=None: None)
+    monkeypatch.setattr(commands, "play_sound", lambda name: None)
+    monkeypatch.setattr(browser, "foreground_kind", lambda: "")
+    commands.handle_command("открой")
+    assert commands.dialog_accepts("Claude.")
+    commands.handle_command("claude")
+    commands.handle_command("закрой")             # не в браузере - переспрашивает «Что закрыть?»
+    commands.handle_command("телеграм")           # значит, закрыть, а не открыть
+    assert calls == [("open_app", {"name": "claude"}), ("close_app", {"name": "телеграм"})]
 
 
 def test_what_did_you_do(monkeypatch):

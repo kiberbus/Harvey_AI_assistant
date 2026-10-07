@@ -177,10 +177,14 @@ def _with_uia(fn):
             pass
 
 
+# Падежное окончание русского слова: «с google календарем» → «google календар» есть в «Google Календарь»
+_CASE_ENDING_RE = re.compile(r"(?<=[а-яё]{3})(?:ами|ями|ом|ем|ой|ей|ою|ую|ью|ах|ях|ам|ям|ы|и|а|я|у|ю|е|о|ь)\b")
+
+
 def _keywords(name: str) -> set[str]:
-    """По каким словам искать вкладку: «ютуб» → youtube, «гитхаб» → github."""
+    """По каким словам искать вкладку: «ютуб» → youtube, «гитхаб» → github, «календарем» → «календар»."""
     low = " ".join((name or "").lower().split())
-    words = {low}
+    words = {low, _CASE_ENDING_RE.sub("", low)}
     for site, pattern in SITE_ALIASES.items():
         if re.fullmatch(pattern, low):
             host = urllib.parse.urlparse(SITES[site]).hostname or ""

@@ -73,6 +73,10 @@ def test_route(phrase, expected):
     assert route(phrase) == expected
 
 
+def test_spelling_mishearing():
+    assert route(parse.fix_hearing("исправь архографические ошибки")) == "selection:fix"     # из лога
+
+
 def test_commands_win_over_questions():
     """«Переведи компьютер в спящий режим» - команда, а не перевод: обычные команды проверяются раньше."""
     assert parse.parse_all("переведи компьютер в спящий режим") is not None
