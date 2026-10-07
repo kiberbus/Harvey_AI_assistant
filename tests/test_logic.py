@@ -293,6 +293,11 @@ def test_log_report_counts_how_wake_model_hears():
     ]
     assert log_report.wake_stats(lines) == (3, 1, 1)
     assert log_report.wake_stats(lines[-2:]) is None
+    newer = ["2026-10-07 23:30:00 [Wake] слушаю имя моделью harvey.onnx от 07.10 23:27 (порог 0.5)",
+             "2026-10-07 23:30:05 [Wake] уверенность в имени 0.93 (порог 0.5) — услышала",
+             "2026-10-07 23:30:05 [Распознано] Харви, пауза."]
+    assert log_report.wake_stats(lines + newer) == (1, 1, 0)      # новая модель - старые цифры не смешиваю
+    assert log_report.wake_stats(lines + newer + newer) == (2, 2, 0)   # перезапуск с той же моделью - считаю дальше
 
 
 def test_early_check_audio_is_not_transcribed_again(monkeypatch):

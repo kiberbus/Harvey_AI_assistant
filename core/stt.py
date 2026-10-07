@@ -335,7 +335,9 @@ class WakeDetector:
             from openwakeword.model import Model
 
             self._model = Model(wakeword_models=[str(WAKE_MODEL)], inference_framework="onnx")
-            log("Wake", f"слушаю имя моделью {WAKE_MODEL.name} (порог {WAKE_THRESHOLD})")
+            # Дата файла - чтобы отчёт по логу считал каждую модель отдельно (log_report.wake_stats)
+            stamp = time.strftime("%d.%m %H:%M", time.localtime(WAKE_MODEL.stat().st_mtime))
+            log("Wake", f"слушаю имя моделью {WAKE_MODEL.name} от {stamp} (порог {WAKE_THRESHOLD})")
         except Exception as e:
             log("Wake", f"не удалось загрузить {WAKE_MODEL.name}: {e} — имя ищет Whisper")
 

@@ -55,7 +55,8 @@ def _local_checker() -> Callable[[str], bool] | None:
 def wake_stats(lines: list[str]) -> tuple[int, int, int] | None:
     """Как модель имени слышит вживую: (обращений к Харви, из них модель услышала, сработала без имени).
     Обращение - фраза, где Whisper записал имя. Строку «уверенность в имени … услышала» Харви пишет
-    перед «Распознано» той же фразы. None - модель ни разу не загружалась."""
+    перед «Распознано» той же фразы. Считаю только последнюю модель: строка загрузки с другой датой файла
+    или другим порогом начинает счёт заново. None - модель ни разу не загружалась."""
     try:
         from core.util import WAKE_PATTERN
     except Exception:
@@ -63,12 +64,16 @@ def wake_stats(lines: list[str]) -> tuple[int, int, int] | None:
     loaded = seen = False
     named = hits = false_alarms = 0
     heard = False
+    model_line = ""
     for line in lines:
         m = LINE_RE.match(line)
         if not m:
             continue
         _day, tag, text = m.groups()
         if tag == "Wake" and text.startswith("слушаю имя моделью"):
+            if text != model_line:                  # новая модель или порог
+                named = hits = false_alarms = 0
+                model_line = text
             loaded = seen = True
         elif tag == "Wake" and "Whisper" in text:
             loaded = False                       # «… имя ищет Whisper»: запуск без модели или она отключилась
