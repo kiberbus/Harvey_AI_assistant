@@ -264,6 +264,37 @@ def test_record_utterance_returns_early():
     assert 38 - q2.qsize() == 8 + stt.SILENCE_BLOCKS                # команда не законченная - ждём как раньше
 
 
+def test_wake_model_decides_only_with_gate(monkeypatch):
+    """В режиме наблюдения промах модели имени не отбрасывает фразу и не отключает досрочное распознавание."""
+    from core import stt
+    detector = stt.WakeDetector()
+    assert not detector.trusted                                # модели нет
+    detector._model = object()
+    monkeypatch.setattr(stt, "WAKE_GATE", False)
+    assert detector.enabled and not detector.trusted
+    monkeypatch.setattr(stt, "WAKE_GATE", True)
+    assert detector.trusted
+
+
+def test_log_report_counts_how_wake_model_hears():
+    import log_report
+    lines = [
+        "2026-10-07 18:00:00 [Wake] слушаю имя моделью harvey.onnx (порог 0.5)",
+        "2026-10-07 18:00:05 [Wake] уверенность в имени 0.81 (порог 0.5) — услышала",
+        "2026-10-07 18:00:05 [Распознано] Харви, пауза.",
+        "2026-10-07 18:00:09 [Распознано] Харви, громче.",                      # модель промолчала
+        "2026-10-07 18:00:09 [Wake] модель не узнала имя (уверенность 0.02, порог 0.5)",
+        "2026-10-07 18:00:20 [Wake] уверенность в имени 0.12 (порог 0.5) — мимо",
+        "2026-10-07 18:00:20 [Распознано] Харви, стоп.",
+        "2026-10-07 18:00:30 [Wake] уверенность в имени 0.64 (порог 0.5) — услышала",
+        "2026-10-07 18:00:30 [Распознано] Ну что, пошли?",                         # без имени - ложное срабатывание
+        "2026-10-07 19:00:00 [Wake] модели harvey.onnx нет - имя ищет Whisper (как раньше).",
+        "2026-10-07 19:00:05 [Распознано] Харви, пауза.",                         # модели нет - не считаю
+    ]
+    assert log_report.wake_stats(lines) == (3, 1, 1)
+    assert log_report.wake_stats(lines[-2:]) is None
+
+
 def test_early_check_audio_is_not_transcribed_again(monkeypatch):
     """Досрочная проверка не нашла команду, а после неё ничего не сказали: запись та же - Whisper второй раз не нужен."""
     import queue

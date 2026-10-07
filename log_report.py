@@ -52,6 +52,38 @@ def _local_checker() -> Callable[[str], bool] | None:
     return understood
 
 
+def wake_stats(lines: list[str]) -> tuple[int, int, int] | None:
+    """Как модель имени слышит вживую: (обращений к Харви, из них модель услышала, сработала без имени).
+    Обращение - фраза, где Whisper записал имя. Строку «уверенность в имени … услышала» Харви пишет
+    перед «Распознано» той же фразы. None - модель ни разу не загружалась."""
+    try:
+        from core.util import WAKE_PATTERN
+    except Exception:
+        return None
+    loaded = seen = False
+    named = hits = false_alarms = 0
+    heard = False
+    for line in lines:
+        m = LINE_RE.match(line)
+        if not m:
+            continue
+        _day, tag, text = m.groups()
+        if tag == "Wake" and text.startswith("слушаю имя моделью"):
+            loaded = seen = True
+        elif tag == "Wake" and "Whisper" in text:
+            loaded = False                       # «… имя ищет Whisper»: запуск без модели или она отключилась
+        elif tag == "Wake" and text.startswith("уверенность в имени"):
+            heard = text.endswith("услышала")
+        elif tag == "Распознано" and loaded:
+            if WAKE_PATTERN.search(text.lower()):
+                named += 1
+                hits += heard
+            elif heard:
+                false_alarms += 1
+            heard = False
+    return (named, hits, false_alarms) if seen else None
+
+
 def _percentiles(values: list[float]) -> str:
     if not values:
         return "—"
@@ -70,7 +102,8 @@ def build_report(top: int = 25) -> str:
     run: dict[str, list[float]] = {route: [] for route in ROUTES.values()}
     days: set[str] = set()
     route = None
-    for line in _log_lines():
+    lines = _log_lines()
+    for line in lines:
         m = LINE_RE.match(line)
         if not m:
             continue
@@ -118,6 +151,16 @@ def build_report(top: int = 25) -> str:
     out += [f"   {n:>3} × {text}" for text, n in failed.most_common(top)] or ["   нет"]
     out += ["", f"── Ошибки в коде: {sum(errors.values())} ──"]
     out += [f"   {n:>3} × {text}" for text, n in errors.most_common(top)] or ["   нет"]
+    wake = wake_stats(lines)
+    if wake:
+        named, hits, false_alarms = wake
+        out += ["", "── Модель имени (wake/harvey.onnx) ──"]
+        if named:
+            out += [f"   из {named} обращений к Харви услышала {hits} ({100 * hits / named:.0f}%); "
+                    f"сработала без имени: {false_alarms}",
+                    "   Слышит почти всё (95% и больше) - можно включать WAKE_GATE = True в config.py"]
+        else:
+            out += [f"   обращений к Харви с моделью пока не было; сработала без имени: {false_alarms}"]
     if stt:
         out += ["", "── Задержки (от конца фразы) ──", f"   распознавание: {_percentiles(stt)}"]
         out += [f"   выполнение {name}: {_percentiles(values)}" for name, values in run.items() if values]

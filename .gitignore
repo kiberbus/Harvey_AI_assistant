@@ -27,4 +27,5 @@ wake/*.tflite
 .wake_ok
 wake/*.data
 wake/samples/
-wake/*.zip
+# Архивы с образцами голоса и обученными моделями (harvey_outputs.zip и т. п.)
+*.zip

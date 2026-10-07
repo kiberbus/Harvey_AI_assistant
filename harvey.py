@@ -35,7 +35,6 @@ from config import (
     QUIET_MODE,
     SAMPLE_RATE,
     WAKE_BEEP,
-    WAKE_GATE,
     WAKE_THRESHOLD,
 )
 from core.util import (  # noqa: F401
@@ -219,7 +218,7 @@ def main() -> None:
 
                 def early_check(candidate: np.ndarray) -> bool:
                     # Короткая пауза и законченная команда ("пауза", "громкость 30") - дальше не жду
-                    if daily._sleeping or (_wake.enabled and not _wake.peek() and not dialog_open):
+                    if daily._sleeping or (_wake.trusted and not _wake.peek() and not dialog_open):
                         return False
                     guess = transcribe(candidate)
                     if guess and is_quick_command(guess, need_name=not dialog_open,
@@ -235,7 +234,7 @@ def main() -> None:
                     continue
                 # С детектором имени Whisper нужен только в диалоге, при да/нет
                 # и чтобы услышать "стоп", пока Харви говорит
-                if _wake.enabled and WAKE_GATE and not heard_name and not (
+                if _wake.trusted and not heard_name and not (
                         (dialog_open or daily._pending is not None or speaking) and not daily._sleeping):
                     continue
 

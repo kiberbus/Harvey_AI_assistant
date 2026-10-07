@@ -30,6 +30,7 @@ from config import (
     VAD_ENABLED,
     VAD_THRESHOLD,
     WAKE_COLLECT,
+    WAKE_GATE,
     WAKE_MODEL,
     WAKE_SAMPLES_DIR,
     WAKE_SAMPLES_MAX,
@@ -314,6 +315,12 @@ class WakeDetector:
     @property
     def enabled(self) -> bool:
         return self._model is not None
+
+    @property
+    def trusted(self) -> bool:
+        """Решает ли модель, звучало ли имя. В режиме наблюдения (WAKE_GATE = False) она только пишет в лог:
+        её промах не должен ни отбрасывать фразу, ни отключать досрочное распознавание («Харви, пауза»)."""
+        return self.enabled and WAKE_GATE
 
     def load(self) -> None:
         if not WAKE_MODEL.exists():
