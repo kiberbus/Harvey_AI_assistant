@@ -208,11 +208,27 @@ def collect_name_sample(audio: np.ndarray) -> None:
     threading.Thread(target=work, daemon=True).start()
 
 
+_last_heard: tuple[np.ndarray, str] | None = None     # последний распознанный звук и его текст
+
+
 def transcribe(audio: np.ndarray) -> str:
-    """float32 16 кГц -> текст. Если VAD не нашёл речь - пустая строка."""
-    global _vad_skipped
+    """float32 16 кГц -> текст. Если VAD не нашёл речь - пустая строка.
+    Тот же звук второй раз не распознаю. После досрочной проверки (record_utterance) фраза обычно так
+    и кончается, и запись совпадает с проверенной до сэмпла, а Whisper с temperature=0 ответил бы то же самое.
+    Так короткая фраза стоит одного прогона на видеокарте, а не двух."""
+    global _last_heard
     if _whisper_model is None:
         return ""
+    last = _last_heard
+    if last is not None and len(last[0]) == len(audio) and np.array_equal(last[0], audio):
+        return last[1]
+    text = _transcribe(audio)
+    _last_heard = (audio, text)
+    return text
+
+
+def _transcribe(audio: np.ndarray) -> str:
+    global _vad_skipped
     if VAD_ENABLED:
         try:
             if not has_speech(audio):

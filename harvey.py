@@ -106,6 +106,7 @@ from core.commands import (  # noqa: F401
 )
 from core.parse import is_quick_command
 import core.daily as daily
+import core.game as game
 import core.stt as stt
 import core.system as system
 import core.tray as tray
@@ -134,6 +135,7 @@ def main() -> None:
         return
 
     _ducker.recover()                        # если в прошлый раз музыка осталась тихой - возвращаю
+    game.start()                             # до прогрева ИИ: посреди игры модель в видеопамять не гружу
     threading.Thread(target=_synth_worker, daemon=True).start()
     threading.Thread(target=_play_worker, daemon=True).start()
     threading.Thread(target=_load_start_apps, daemon=True).start()

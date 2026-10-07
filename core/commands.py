@@ -57,7 +57,7 @@ from core.tools import (
     TOOLS,
     execute_tool_dictate,
 )
-from core import llm, smart, tools
+from core import game, llm, smart, tools
 
 
 SYSTEM_PROMPT = f"""Ты — голосовой ассистент по имени {ASSISTANT_NAME}, управляющий компьютером с Windows 11.
@@ -144,6 +144,9 @@ def run_llm(user_text: str) -> None:
 def _warmup_llm(wait_sec: float = 180.0) -> None:
     """Прогреваю модель заранее, чтобы первая команда не ждала холодного старта.
     При входе в Windows Харви и Ollama стартуют одновременно, поэтому жду, пока Ollama поднимется."""
+    if game.active():                              # 4-5 ГБ видеопамяти нужнее игре
+        log("LLM", "идёт игра - модель не прогреваю.")
+        return
     deadline = time.time() + wait_sec
     waited = False
     while True:
@@ -167,7 +170,7 @@ def _warmup_llm(wait_sec: float = 180.0) -> None:
 
 def unload_model() -> None:
     try:
-        ollama.generate(model=MODEL, keep_alive=0)
+        llm.unload()
         log("Система", "Модель выгружена из видеокарты.")
     except Exception:
         pass

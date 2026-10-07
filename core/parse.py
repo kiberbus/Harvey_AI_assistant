@@ -150,6 +150,12 @@ def parse_local(segment: str) -> Callable[[], str] | None:
     if R["sleep_mode"].search(seg):
         return lambda: tools.execute_tool("sleep_mode", {})
 
+    # Игровой режим - раньше «включи X» (приложение) и медиа. «Выключи» раньше: «игровой режим» есть в обоих
+    if R["game_mode_off"].search(seg):
+        return lambda: tools.execute_tool("game_mode", {"state": False})
+    if R["game_mode_on"].search(seg):
+        return lambda: tools.execute_tool("game_mode", {"state": True})
+
     # Лайки в Яндекс Музыке раньше клавиш и медиа: «сохрани эту песню» - не Ctrl+S.
     # Дизлайк и «убери лайк» раньше лайка, в них тоже есть «лайк»
     for key, action in (("track_dislike", "dislike"), ("track_unlike", "unlike"), ("track_like", "like")):

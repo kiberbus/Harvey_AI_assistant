@@ -70,7 +70,7 @@ from core.daily import (  # noqa: F401
 from core.tray import (  # noqa: F401
     restart_self,
 )
-from core import browser, calc, system, undo
+from core import browser, calc, game, system, undo
 from core import gcal
 
 
@@ -130,6 +130,7 @@ FUNCTIONS: dict[str, Callable[..., str]] = {
     "system_status": system.system_status,
     "gpu_status": system.gpu_status,
     "microphone": system.microphone,
+    "game_mode": game.set_game_mode,
     "calculate": calc.calculate,
     "calendar_agenda": gcal.calendar_agenda,
     "calendar_next": gcal.calendar_next,
@@ -220,6 +221,8 @@ TOOLS = [
     _tool("system_status", "Загрузка процессора и оперативной памяти.", {}, []),
     _tool("gpu_status", "Температура и загрузка видеокарты.", {}, []),
     _tool("microphone", "Включить (true) или выключить (false) микрофон.", {"state": {"type": "boolean"}}, ["state"]),
+    _tool("game_mode", "Включить (true) или выключить (false) игровой режим: ассистент освобождает видеокарту "
+                       "и процессор для игры.", {"state": {"type": "boolean"}}, ["state"]),
     _tool("calendar_agenda", "Что запланировано в Google Календаре на день: встречи и задачи со сроком.",
           {"day": _DAY}, []),
     _tool("calendar_next", "Когда следующая встреча в календаре.", {}, []),

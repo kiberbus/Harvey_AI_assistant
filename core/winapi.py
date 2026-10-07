@@ -270,6 +270,24 @@ def monitor_areas() -> list[Rect]:
     return sorted(found)
 
 
+def foreground_fullscreen() -> int | None:
+    """pid активного окна, если оно закрывает весь свой монитор: игра на весь экран или «окно без рамки».
+    Развёрнутое окно не считаю: при автоскрытии панели задач оно тоже закрывает монитор целиком."""
+    hwnd = _user32.GetForegroundWindow()
+    if not hwnd or _user32.IsIconic(hwnd) or _user32.IsZoomed(hwnd):
+        return None
+    rect, info = wintypes.RECT(), MONITORINFO(cbSize=ctypes.sizeof(MONITORINFO))
+    with _DpiAware():
+        _user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        _user32.GetMonitorInfoW(_user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), ctypes.byref(info))
+    m = info.rcMonitor
+    if rect.left > m.left or rect.top > m.top or rect.right < m.right or rect.bottom < m.bottom:
+        return None
+    pid = wintypes.DWORD()
+    _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value or None
+
+
 def window_area(hwnd: int) -> Rect:
     """Рабочая область монитора, на котором окно."""
     with _DpiAware():

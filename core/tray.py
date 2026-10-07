@@ -34,6 +34,7 @@ from core.daily import (  # noqa: F401
     set_sleeping,
 )
 import core.daily as daily
+import core.game as game
 import core.system as system
 
 
@@ -141,6 +142,8 @@ def start_tray() -> None:
         pystray.MenuItem("Спать", go_sleep, visible=lambda _i: not daily._sleeping),
         pystray.MenuItem("Проснуться", wake, visible=lambda _i: daily._sleeping),
         pystray.MenuItem("Включить микрофон", mic_on, visible=lambda _i: system.mic_is_muted),
+        pystray.MenuItem("Игровой режим", lambda _i, _t: game.set_game_mode(not game.active()),
+                         checked=lambda _i: game.active()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Заметки", lambda _i, _t: open_notes()),
         pystray.MenuItem("Лог", lambda _i, _t: os.startfile(str(LOG_FILE)), visible=lambda _i: LOG_ENABLED),
@@ -158,11 +161,11 @@ def start_tray() -> None:
     def refresh() -> None:            # цвет значка: зелёный - слушает, синий - говорит, серый - спит
         last = None
         while not _quit_event.is_set():
-            state = (daily._sleeping, _speaking.is_set())
+            state = (daily._sleeping, _speaking.is_set(), game.active())    # галочка «Игровой режим» - тоже
             if state != last:
                 last = state
                 try:
-                    icon.icon = _tray_image(*state)
+                    icon.icon = _tray_image(*state[:2])
                     icon.title = f"{ASSISTANT_NAME}: {'спит' if state[0] else 'говорит' if state[1] else 'слушает'}"
                     icon.update_menu()
                 except Exception:

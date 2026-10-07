@@ -25,6 +25,22 @@ UNDO_TTL = 120                   # «отмени» возвращает дей�
 UNDO_DEPTH = 10                  # сколько действий подряд можно отменить
 LLM_STREAM = True                # озвучиваю ответ по предложениям, не дожидаясь конца генерации
 
+# Игровой режим (core/game.py): пока идёт игра, модель ИИ не занимает видеопамять, а Харви уступает процессор
+GAME_MODE_AUTO = True            # сама замечаю игру на весь экран; False - только голосом «игровой режим» или из трея
+GAME_KEEP_ALIVE = 0              # в игре модель выгружается сразу после ответа: ответ ИИ ~5 с дольше (загрузка);
+                                 # "1m" - минуту после ответа следующие вопросы быстрые, но 4-5 ГБ заняты
+GAME_CHECK_SEC = 3               # как часто смотрю на активное окно
+GAME_LINGER_SEC = 300            # игру свернули, но она запущена - режим держится ещё столько секунд
+GAME_LOW_PRIORITY = True         # в игре приоритет Харви ниже обычного, чтобы игра не теряла кадры
+# Эти программы на весь экран - не игра (ещё браузеры из BROWSER_EXES и плееры из VIDEO_APPS)
+GAME_NOT_GAMES = {
+    "explorer.exe", "lockapp.exe", "searchhost.exe", "startmenuexperiencehost.exe", "shellexperiencehost.exe",
+    "applicationframehost.exe", "screenclippinghost.exe", "snippingtool.exe", "textinputhost.exe",
+    "nvidia overlay.exe", "wallpaper32.exe", "wallpaper64.exe", "telegram.exe", "discord.exe",
+    "powerpnt.exe", "photos.exe", "claude.exe", "code.exe", "windowsterminal.exe", "obs64.exe",
+    "wmplayer.exe", "microsoft.media.player.exe",
+}
+
 # ИИ: текст и экран
 SMART_DICTATION = True           # ИИ только расставляет знаки, слова не трогает
 SELECTION_MAX_CHARS = 4000       # длиннее не отправляю: долго и не влезает в контекст

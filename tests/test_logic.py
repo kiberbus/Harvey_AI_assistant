@@ -264,6 +264,132 @@ def test_record_utterance_returns_early():
     assert 38 - q2.qsize() == 8 + stt.SILENCE_BLOCKS                # команда не законченная - ждём как раньше
 
 
+def test_early_check_audio_is_not_transcribed_again(monkeypatch):
+    """Досрочная проверка не нашла команду, а после неё ничего не сказали: запись та же - Whisper второй раз не нужен."""
+    import queue
+    from collections import deque
+
+    import numpy as np
+
+    from core import stt
+    runs = []
+
+    class FakeWhisper:
+        def transcribe(self, audio, **kwargs):
+            runs.append(len(audio))
+            return iter([type("Segment", (), {"text": f" фраза {len(runs)}"})()]), None
+
+    monkeypatch.setattr(stt, "_whisper_model", FakeWhisper())
+    monkeypatch.setattr(stt, "VAD_ENABLED", False)
+    monkeypatch.setattr(stt, "_last_heard", None)
+    loud = np.full((stt.BLOCK_SIZE, 1), 0.3, dtype=np.float32)
+    quiet = np.zeros((stt.BLOCK_SIZE, 1), dtype=np.float32)
+
+    def record(blocks):
+        q = queue.Queue()
+        for block in blocks:
+            q.put(block)
+        guesses = []
+        audio = stt.record_utterance(q, deque(), loud.flatten(), 0.05,
+                                     lambda a: guesses.append(stt.transcribe(a)))    # None - команда не готова
+        return guesses, stt.transcribe(audio)
+
+    guesses, text = record([loud] * 8 + [quiet] * 30)
+    assert len(runs) == 1 and text == guesses[0] == "фраза 1"
+
+    runs.clear()
+    monkeypatch.setattr(stt, "_last_heard", None)     # начало фразы то же, что выше, - не из кэша
+    # Две досрочные проверки, и после второй человек ещё договорил - распознаю всю фразу заново
+    guesses, text = record([loud] * 8 + [quiet] * 5 + [loud] * 3 + [quiet] * 5 + [loud] * 3 + [quiet] * 30)
+    assert len(runs) == 3 and len(guesses) == 2 and text not in guesses
+
+
+# игровой режим
+
+@pytest.mark.parametrize("exe,is_game", [
+    ("cs2.exe", True),
+    ("eldenring.exe", True),
+    ("firefox.exe", False),        # видео на весь экран в браузере
+    ("vlc.exe", False),
+    ("explorer.exe", False),       # рабочий стол
+    ("lockapp.exe", False),        # экран блокировки
+    ("", False),
+])
+def test_game_is_not_browser_or_player(exe, is_game):
+    from core import game
+    assert game.is_game(exe) is is_game
+
+
+@pytest.fixture
+def game_state(monkeypatch):
+    """Игровой режим без окон и процессов: screen["pid"] - что на весь экран, alive - какие процессы запущены."""
+    from core import game, llm
+    for name, value in (("_game", None), ("_auto", False), ("_forced", None), ("_active", False)):
+        monkeypatch.setattr(game, name, value)
+    monkeypatch.setattr(game, "GAME_MODE_AUTO", True)
+    monkeypatch.setattr(game, "GAME_LOW_PRIORITY", False)
+    monkeypatch.setattr(llm, "_keep_alive", llm._keep_alive)
+    screen: dict = {"pid": None}
+    alive: set[int] = set()
+    unloads: list[int] = []
+    monkeypatch.setattr(game, "foreground_fullscreen", lambda: screen["pid"])
+    monkeypatch.setattr(game, "_exe", lambda pid: {1: "cs2.exe", 2: "firefox.exe"}.get(pid, ""))
+    monkeypatch.setattr(game, "_alive", lambda pid: pid in alive)
+    monkeypatch.setattr(game, "_unload_model", lambda: unloads.append(1))
+    return game, llm, screen, alive, unloads
+
+
+def test_game_mode_follows_the_game(game_state):
+    game, llm, screen, alive, unloads = game_state
+    game.update(now=0)
+    assert not game.active()
+
+    screen["pid"] = 1                                        # игра на весь экран
+    alive.add(1)
+    game.update(now=10)
+    assert game.active() and unloads == [1] and llm._keep_alive == game.GAME_KEEP_ALIVE
+
+    screen["pid"] = None                                     # свернул игру в Discord - режим держится
+    game.update(now=20)
+    assert game.active()
+    game.update(now=20 + game.GAME_LINGER_SEC)               # но не вечно, если игра так и не вернулась
+    assert not game.active() and llm._keep_alive == game.KEEP_ALIVE
+
+    screen["pid"] = 1
+    game.update(now=1000)
+    screen["pid"] = None
+    alive.discard(1)                                         # игру закрыли - режим сразу выключается
+    game.update(now=1001)
+    assert not game.active()
+
+    screen["pid"] = 2                                        # ютуб на весь экран - не игра
+    game.update(now=1002)
+    assert not game.active() and unloads == [1, 1]
+
+
+def test_game_mode_manual_choice_lasts_until_game_changes(game_state):
+    game, llm, screen, alive, unloads = game_state
+    assert game.set_game_mode(True).endswith("игровой режим")
+    game.update(now=0)
+    assert game.active()                                     # включил сам - без игры не выключается
+
+    screen["pid"] = 1
+    alive.add(1)
+    game.update(now=1)
+    assert game.active()
+    screen["pid"] = None
+    alive.discard(1)
+    game.update(now=2)
+    assert not game.active()                                 # игра кончилась - снова автоматически
+
+    screen["pid"] = 1
+    alive.add(1)
+    game.update(now=3)
+    game.set_game_mode(False)                                # выключил посреди игры - не включаю обратно
+    game.update(now=4)
+    assert not game.active() and llm._keep_alive == game.KEEP_ALIVE
+
+
 def test_sleep_reply_is_just_ok():
     from core import daily
     try:

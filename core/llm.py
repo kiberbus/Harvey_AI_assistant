@@ -11,12 +11,26 @@ from config import (
 )
 
 
+_keep_alive: str | int = KEEP_ALIVE    # в игровом режиме 0 - модель выгружается сразу после ответа (core/game.py)
+
+
+def set_keep_alive(value: str | int) -> None:
+    global _keep_alive
+    _keep_alive = value
+
+
+def unload() -> None:
+    """Выгружает модель из видеокарты сейчас. Незагруженную Ollama не грузит: пустой запрос
+    с keep_alive=0 только выгружает."""
+    ollama.generate(model=MODEL, keep_alive=0)
+
+
 def _kwargs(messages: list[dict], tools: list | None, num_predict: int, num_ctx: int | None) -> dict:
     kwargs = dict(
         model=MODEL,
         messages=messages,
         options={"num_ctx": num_ctx or NUM_CTX, "temperature": 0, "num_predict": num_predict},
-        keep_alive=KEEP_ALIVE,
+        keep_alive=_keep_alive,
     )
     if tools:
         kwargs["tools"] = tools
