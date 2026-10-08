@@ -132,6 +132,16 @@ PHRASE_CASES = [
 
     # из лога: уходило в ИИ
     ("obsidian", [("open_app", {"name": "obsidian"})]),             # название из Пуска без глагола
+    # OBS: как его говорят и как его слышит Whisper («добавь ФБС» - из лога 9 октября)
+    ("открой obs", [("open_app", {"name": "obs"})]),
+    ("открой обс", [("open_app", {"name": "обс"})]),
+    ("запусти о би эс", [("open_app", {"name": "о би эс"})]),
+    ("открой обэс", [("open_app", {"name": "обэс"})]),
+    ("открой фбс", [("open_app", {"name": "obs"})]),
+    ("открой o.b.s.", [("open_app", {"name": "obs"})]),
+    ("закрой обс", [("close_app", {"name": "обс"})]),
+    ("сверни obs", [("minimize_app", {"name": "obs"})]),
+    ("обс", [("open_app", {"name": "обс"})]),
     ("пролистни вниз", [("shortcut", {"action": "page_down"})]),
     ("листай", [("shortcut", {"action": "page_down"})]),
     ("прокрути вверх", [("shortcut", {"action": "page_up"})]),

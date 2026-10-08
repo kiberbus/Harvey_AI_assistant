@@ -158,7 +158,8 @@ WHISPER_COMPUTE = "int8_float16" # для процессора берётся in
 WHISPER_PROMPT = ("Харви, открой YouTube, запусти Telegram, открой Claude, громкость пятьдесят процентов, "
                   "пауза, таймер, заметки, погода, запиши.")
 # Подсказки для Whisper. На моём тесте с ними 49/50 команд, без них 47/50
-WHISPER_HOTWORDS = "Харви Claude Telegram YouTube Яндекс Музыка громкость пауза трек Obsidian Stepik"
+# OBS - без подсказки Whisper записывал его как «ФБС» (из лога 9 октября)
+WHISPER_HOTWORDS = "Харви Claude Telegram YouTube Яндекс Музыка громкость пауза трек Obsidian Stepik OBS"
 
 # Синтез речи
 TTS_ENGINE = "silero"            # silero звучит естественнее, piper - запасной (включается сам, если Silero не загрузился)
@@ -260,7 +261,7 @@ NAME_GROUPS = [
     ({"task manager", "диспетчер задач", "диспетчер задачи", "диспетчер"}, ("taskmgr.exe",)),
     ({"terminal", "терминал", "windows terminal"}, ("windowsterminal.exe",)),
     ({"vscode", "visual studio code", "код", "вс код"}, ("code.exe",)),
-    ({"obs", "obs studio", "обс"}, ("obs64.exe", "obs32.exe")),
+    ({"obs", "obs studio", "обс", "обэс", "обээс", "обиэс", "о бэ эс", "о би эс", "обс студио"}, ("obs64.exe", "obs32.exe")),
 ]
 
 # Эти процессы "закрой" не трогает никогда
