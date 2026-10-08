@@ -6,10 +6,11 @@ import difflib
 import numpy as np
 import os
 import queue
+import re
 import sounddevice as sd
 import threading
 import time
-from collections import deque
+from collections import Counter, deque
 import subprocess
 import sys
 from pathlib import Path
@@ -293,9 +294,25 @@ def _transcribe(audio: np.ndarray) -> str:
         return " ".join(s.text.strip() for s in segments).strip()
 
 
+LOOP_REPEATS = 20               # человек повторяет слово до ~14 раз («так, так, так…»), зациклившийся Whisper - 40-112
+
+
+def looped(low: str) -> bool:
+    """Whisper зациклился на шуме, смехе или крике и повторяет одно и то же до упора: «открой, слава, слава,
+    слава…», «кхе-кхе-кхе…», «ооооо…». Из лога 9 октября: такая фраза с именем ушла в ИИ на 11 с."""
+    words = re.findall(r"\w+", low)
+    if words:
+        top = Counter(words).most_common(1)[0][1]
+        if top >= LOOP_REPEATS and top >= 0.6 * len(words):
+            return True
+    letters = [c for c in low if c.isalpha()]
+    run = max((len(m.group()) for m in re.finditer(r"(\w)\1*", low)), default=0)
+    return run >= LOOP_REPEATS and run >= 0.6 * len(letters)
+
+
 def is_noise(low: str) -> bool:
-    """Отсеивает галлюцинации Whisper на тишине, включая эхо собственного промпта."""
-    if len(low) < 3 or any(h in low for h in HALLUCINATIONS):
+    """Отсеивает галлюцинации Whisper на тишине, включая эхо собственного промпта, и зацикленные фразы."""
+    if len(low) < 3 or any(h in low for h in HALLUCINATIONS) or looped(low):
         return True
     return difflib.SequenceMatcher(None, low, WHISPER_PROMPT.lower()).ratio() > 0.8
 

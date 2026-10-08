@@ -143,6 +143,20 @@ def test_dialog_accepts(text, accepted):
     assert commands.dialog_accepts(text) is accepted
 
 
+@pytest.mark.parametrize("text,noise", [
+    ("харви, открой, слава, харви, открой, " + ", ".join(["слава"] * 50) + ".", True),   # из лога 9 октября: ушло в ИИ
+    ("кхе-" * 55 + "кхе", True),
+    ("о" * 90, True),
+    ("так, подождите, стоп, стоп, стоп, стоп, стоп, стоп.", False),     # живые повторы не трогаю
+    ("да, да, да, да, да, да, да.", False),
+    (", ".join(["так"] * 14) + ".", False),
+    ("харви, ну даааа, включи музыку", False),
+])
+def test_whisper_loop_is_noise(text, noise):
+    from core import stt
+    assert stt.is_noise(text) is noise
+
+
 def test_whisper_series_hallucination_is_noise():
     from core import stt
     assert stt.is_noise("смотрите продолжение в следующей серии.")    # из лога: переключало трек
