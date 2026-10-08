@@ -105,6 +105,7 @@ from core.commands import (  # noqa: F401
     _warmup_llm,
     dialog_accepts,
     handle_command,
+    split_address,
     unload_model,
 )
 from core.parse import is_quick_command
@@ -245,7 +246,7 @@ def main() -> None:
 
                 audio = record_utterance(audio_q, pre_buffer, block, limit, early_check if EARLY_SILENCE else None)
                 pre_buffer.clear()
-                heard_name = _wake.take()
+                heard_name = _wake.take()            # решает модель только при WAKE_GATE, иначе всегда False
                 if audio is None:
                     continue
                 if daily._sleeping and too_long_to_wake(audio, heard_name):
@@ -265,23 +266,21 @@ def main() -> None:
                 log("Распознано", text + (" (досрочно)" if early else ""))
 
                 m = WAKE_PATTERN.search(low)
-                named = m is not None or heard_name
                 if m and m.start() <= 2:                     # сохраняю само имя для обучения модели
                     collect_name_sample(audio)
-                if m and _wake.enabled and not heard_name:   # Whisper слышит имя, а модель нет - пишу в лог
+                if m and _wake.enabled and not _wake.last_hit:   # Whisper слышит имя, а модель нет - пишу в лог
                     log("Wake", f"модель не узнала имя (уверенность {_wake.last_peak:.2f}, порог {WAKE_THRESHOLD})")
-                if m:
-                    after_name = text[m.end():]
-                elif heard_name:                    # имя услышала нейросеть, Whisper записал его иначе
-                    after_name = _strip_name_like(text)
-                else:
-                    after_name = text
+                named, after_name = split_address(text)
+                if m and not named:
+                    log("Имя", "говорят обо мне, а не мне - пропускаю")
+                elif not m and heard_name:          # имя услышала нейросеть, Whisper записал его иначе
+                    named, after_name = True, _strip_name_like(text)
                 body = " ".join(re.sub(r"[^\w\s]", " ", after_name.lower()).split())
 
-                # Режим сна: слушаю только "Харви, проснись"
+                # Режим сна: слушаю только "Харви, проснись" (и «проснись, Харви»)
                 if daily._sleeping:
                     dialog_until = 0.0
-                    if named and R["wake_up"].search(low):
+                    if (named or m) and R["wake_up"].search(low):
                         set_sleeping(False)
                         drain(audio_q)
                         if QUIET_MODE:

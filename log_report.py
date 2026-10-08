@@ -89,6 +89,15 @@ def wake_stats(lines: list[str]) -> tuple[int, int, int] | None:
     return (named, hits, false_alarms) if seen else None
 
 
+def wake_verdict(named: int, hits: int, false_alarms: int) -> str:
+    """Можно ли доверить модели решать, звучало ли имя (WAKE_GATE). С включённым WAKE_GATE каждое
+    её срабатывание без имени - ответ на чужой разговор: 8 октября было 36 таких на 86 обращений."""
+    if named and hits >= 0.95 * named and false_alarms <= 0.02 * named:
+        return "   Слышит почти всё и почти не ошибается - можно включать WAKE_GATE = True в config.py"
+    return ("   WAKE_GATE включать рано: нужно слышать 95% обращений и почти не срабатывать без имени "
+            "(иначе Харви отвечает на чужой разговор)")
+
+
 def _percentiles(values: list[float]) -> str:
     if not values:
         return "—"
@@ -163,7 +172,7 @@ def build_report(top: int = 25) -> str:
         if named:
             out += [f"   из {named} обращений к Харви услышала {hits} ({100 * hits / named:.0f}%); "
                     f"сработала без имени: {false_alarms}",
-                    "   Слышит почти всё (95% и больше) - можно включать WAKE_GATE = True в config.py"]
+                    wake_verdict(named, hits, false_alarms)]
         else:
             out += [f"   обращений к Харви с моделью пока не было; сработала без имени: {false_alarms}"]
     if stt:

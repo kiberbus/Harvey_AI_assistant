@@ -154,6 +154,39 @@ def test_dialog_end(text, ends):
     assert bool(util.DIALOG_END_RE.match(text)) is ends
 
 
+# обращение по имени или разговор обо мне
+
+@pytest.mark.parametrize("text,named,command", [
+    ("Харви, пауза.", True, "пауза"),
+    ("Харви.", True, ""),                                            # позвали - команда следующей фразой
+    ("Эй, Харви!", True, ""),
+    ("О, Харви, сверни Obsidian.", True, "сверни Obsidian"),
+    ("Нормально. Харви, закрой Telegram.", True, "закрой Telegram"),
+    ("Включи музыку, Харви.", True, "Включи музыку"),                # из лога: командой взяла «Умница!»
+    ("Сверни Яндекс Музыку, Харви.", True, "Сверни Яндекс Музыку"),  # из лога: развернула её
+    ("Заткнись, Харви.", True, "Заткнись"),
+    ("Спасибо, Харви.", True, "Спасибо"),
+    ("Как меня достала Харви.", False, None),                        # из лога: пищала и ждала команду
+    ("Пошел, Харви.", False, None),
+    ("Я сейчас Харви", False, None),
+    ("Слушай, можешь, пожалуйста, в Харви добавить такую возможность", False, None),   # из лога: ушло в ИИ
+    ("Зачем мне называть ее Джарвис, если я могу назвать ее Харви?", False, None),
+    ("Найс.", False, None),
+])
+def test_split_address(text, named, command):
+    got_named, got_command = commands.split_address(text)
+    assert got_named is named
+    if named:
+        assert got_command.strip(util.PUNCT) == command
+
+
+def test_name_after_preposition_is_not_address():
+    assert util.find_name("добавь в харви лайки") is None
+    assert util.find_name("у харви есть таймер") is None
+    assert util.find_name("о харви сверни obsidian") is not None      # «О, Харви» - возглас, а не «о Харви»
+    assert not parse.is_quick_command("в Харви пауза")
+
+
 def test_llm_stream_sentence_split(monkeypatch):
     said = []
     monkeypatch.setattr(speech, "speak", said.append)
@@ -308,6 +341,36 @@ def test_wake_model_decides_only_with_gate(monkeypatch):
     assert detector.enabled and not detector.trusted
     monkeypatch.setattr(stt, "WAKE_GATE", True)
     assert detector.trusted
+
+
+def test_wake_model_hit_is_not_address_in_observation(monkeypatch):
+    """Из лога 8 октября: в режиме наблюдения «услышала» модели на «Найс», «Да», «Ха?» делало фразу
+    обращением, и Харви отвечала на чужой разговор."""
+    import numpy as np
+
+    from core import stt
+
+    class Model:
+        def predict(self, block):
+            return {"harvey": 0.95}
+
+    monkeypatch.setattr(stt, "log", lambda tag, text: None)
+    detector = stt.WakeDetector()
+    detector._model = Model()
+    block = np.zeros(stt.BLOCK_SIZE, dtype=np.float32)
+    monkeypatch.setattr(stt, "WAKE_GATE", False)
+    detector.feed(block)
+    assert detector.take() is False and detector.last_hit       # в лог попадёт, решать не будет
+    monkeypatch.setattr(stt, "WAKE_GATE", True)
+    detector.feed(block)
+    assert detector.take() is True
+
+
+def test_log_report_says_when_wake_gate_is_too_early():
+    import log_report
+    assert "рано" in log_report.wake_verdict(86, 67, 36)        # 8 октября: 36 срабатываний без имени
+    assert "рано" in log_report.wake_verdict(100, 99, 10)
+    assert "можно" in log_report.wake_verdict(100, 97, 1)
 
 
 def test_log_report_counts_how_wake_model_hears():

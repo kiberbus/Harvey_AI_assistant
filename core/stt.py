@@ -350,6 +350,7 @@ class WakeDetector:
         self._hit = False
         self._peak = 0.0             # наибольшая уверенность в имени с прошлой проверки - для подбора порога
         self.last_peak = 0.0         # то же для последней фразы (после take)
+        self.last_hit = False        # услышала ли модель имя в последней фразе, даже если решает не она
 
     @property
     def enabled(self) -> bool:
@@ -398,12 +399,16 @@ class WakeDetector:
         return self._hit
 
     def take(self) -> bool:
-        """Звучало ли имя с прошлой проверки (флаг сбрасывается)."""
+        """Решила ли модель, что с прошлой проверки звучало имя (флаг сбрасывается).
+        В режиме наблюдения - никогда: что она услышала, видно только в логе и в last_hit.
+        Раньше её «услышала» и тут делало фразу обращением: «Найс», «Да», «Ха?» и крики в игре
+        уходили в ИИ, и Харви отвечала на чужой разговор (из лога 8 октября - 10 раз за вечер)."""
         hit, self._hit = self._hit, False
         if self._peak >= 0.1:              # похоже на имя - пишу в лог, чтобы подобрать порог
             log("Wake", f"уверенность в имени {self._peak:.2f} (порог {WAKE_THRESHOLD}) — {'услышала' if hit else 'мимо'}")
         self.last_peak, self._peak = self._peak, 0.0
-        return hit
+        self.last_hit = hit
+        return hit and self.trusted
 
 
 _wake = WakeDetector()

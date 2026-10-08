@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import ollama
+import re
 import time
 from collections import deque
 from datetime import datetime
@@ -22,6 +23,8 @@ from config import (
     QUIET_MODE,
 )
 from core.util import (  # noqa: F401
+    CALL_RE,
+    DIALOG_END_RE,
     DICTATE_RE,
     END,
     FAIL,
@@ -33,8 +36,10 @@ from core.util import (  # noqa: F401
     RAW,
     REPEAT_RE,
     SILENCE_RE,
+    STOP_RE,
     compose,
     compose_quiet,
+    find_name,
     log,
 )
 from core.speech import (  # noqa: F401
@@ -256,6 +261,28 @@ def dialog_accepts(command: str) -> bool:
         return True
     # Длинное - скорее разговор в комнате: «можешь макбук дальше посмотреть» переключало трек (из лога)
     return len(low.split()) <= DIALOG_MAX_WORDS and parse_all(low) is not None
+
+
+def split_address(text: str) -> tuple[bool, str]:
+    """Обращаются ли ко мне и с какой командой: «Харви, пауза» -> (True, ", пауза").
+    Имя в конце фразы: команда стоит перед ним. Раньше на «Включи музыку, Харви» я пищала и командой
+    брала следующую фразу («Умница!» ушло в ИИ, а «Сверни Яндекс Музыку, Харви» её развернуло).
+    Если перед именем не короткая команда и не «эй», говорят обо мне, а не мне: «как меня достала Харви»,
+    «зачем называть её Джарвис, если можно Харви?». (True, "") - позвали, команду жду следующей фразой."""
+    m = find_name(text.lower())
+    if m is None:
+        return False, text
+    after = text[m.end():]
+    if after.strip(PUNCT):
+        return True, after
+    before = text[:m.start()].strip(PUNCT)
+    low = " ".join(re.sub(r"[^\w\s]", " ", before.lower()).split())
+    if not low or CALL_RE.match(low):
+        return True, ""
+    if len(low.split()) <= DIALOG_MAX_WORDS and (
+            SILENCE_RE.match(low) or STOP_RE.match(low) or DIALOG_END_RE.match(low) or dialog_accepts(before)):
+        return True, before
+    return False, text
 
 
 def handle_command(command: str) -> bool:

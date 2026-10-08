@@ -103,9 +103,9 @@ from core.util import (  # noqa: F401
     SPLIT_RE,
     STOP_RE,
     VERB_RE,
-    WAKE_PATTERN,
     _TENS,
     _UNITS,
+    find_name,
     parse_number,
 )
 from core.apps import (  # noqa: F401
@@ -1179,7 +1179,7 @@ def is_quick_command(text: str, need_name: bool = True, pending: bool = False) -
     """Законченная короткая команда ("пауза", "громкость 30").
     Поиск, напоминания, диктовку и вопросы сюда не беру: после паузы у них часто идёт продолжение."""
     low = text.lower()
-    m = WAKE_PATTERN.search(low)
+    m = find_name(low)
     if m:
         low = low[m.end():]
     elif need_name:
