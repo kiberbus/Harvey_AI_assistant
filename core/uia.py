@@ -1,7 +1,8 @@
 """Нажатие кнопок в окнах через UI Automation.
 
 Нужно для Яндекс Музыки: пока в ней ни разу не нажали play, Windows не видит её как плеер,
-и ни медиа-клавиши, ни SMTC на неё не действуют. А кнопку в окне нажать можно всегда.
+и ни медиа-клавиши, ни SMTC на неё не действуют. А кнопку в окне нажать можно всегда
+(свёрнутое или закрытое другими окно на полсекунды показываю - см. _shown).
 Так же ставится лайк: у Windows нет команды «нравится», а кнопка «Нравится» в окне есть.
 
 И голосом: «нажми подписаться», «кликни на настройки» - click() ищет надпись в активном окне и нажимает."""
@@ -13,6 +14,7 @@ import difflib
 import gc
 import re
 import time
+from contextlib import contextmanager
 from ctypes import wintypes
 
 from core.util import (  # noqa: F401
@@ -28,6 +30,9 @@ from core.browser import (  # noqa: F401
 )
 from core.winapi import (  # noqa: F401
     GW_OWNER,
+    GWL_EXSTYLE,
+    SWP_NOACTIVATE,
+    SWP_NOZORDER,
     WNDENUMPROC,
     _DpiAware,
     _find_procs,
@@ -45,18 +50,81 @@ def _uia():
     return UIAutomationClient
 
 
-def _find_buttons(exes: set[str], names: tuple[str, ...], timeout: float) -> list | None:
-    """Кнопки окна процесса exes в порядке дерева, как только среди них появится одна из names.
-    None - окна нет или нужной кнопки так и не появилось."""
+SW_HIDE, SW_SHOWNOACTIVATE, SW_SHOWMINNOACTIVE = 0, 4, 7
+HWND_TOPMOST, HWND_NOTOPMOST = ctypes.c_void_p(-1), ctypes.c_void_p(-2)
+SWP_NOSIZE, SWP_NOMOVE = 0x0001, 0x0002
+GW_HWNDPREV, WS_EX_TOPMOST = 3, 0x0008
+_KEEP = SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE         # только место в стопке окон, фокус не трогаю
+
+
+def _main_window(exes: set[str]) -> int | None:
+    pids = {p.pid for p in _find_procs({e.lower() for e in exes}, set())}
+    windows = _windows_of(pids) if pids else []
+    return windows[0][0] if windows else None
+
+
+def _topmost(hwnd: int) -> bool:
+    return bool(_user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST)
+
+
+def _above(hwnd: int) -> int | None:
+    """Ближайшее видимое обычное окно над hwnd: потом верну hwnd под него, на старое место."""
+    h = _user32.GetWindow(hwnd, GW_HWNDPREV)
+    while h:
+        if _user32.IsWindowVisible(h) and not _topmost(h):
+            return h
+        h = _user32.GetWindow(h, GW_HWNDPREV)
+    return None
+
+
+def _nudge(hwnd: int) -> None:
+    """Сдвиг на пиксель и обратно: Chromium пересчитывает, видно ли окно, только по событиям окна,
+    а смену места в стопке («поверх всех») не замечает - закрытое раньше окно так и считалось скрытым."""
+    rect = wintypes.RECT()
+    with _DpiAware():                         # те же пиксели туда и обратно, без округления масштаба
+        _user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+        _user32.SetWindowPos(hwnd, None, rect.left + 1, rect.top, 0, 0, flags)
+        _user32.SetWindowPos(hwnd, None, rect.left, rect.top, 0, 0, flags)
+
+
+@contextmanager
+def _shown(hwnd: int):
+    """Electron (Яндекс Музыка) отдаёт UI Automation кнопки страницы, только пока окно видно на экране.
+    Свёрнутое или целиком закрытое другими окна он считает скрытым: в дереве 8 элементов, и «поставь лайк»
+    не находил «Нравится», если окно не активное (из лога 9 октября). Поднять окно наверх Windows не даёт,
+    пока активна другая программа, поэтому на полсекунды ставлю его «поверх всех» - без активации, фокус
+    остаётся, где был, - а потом возвращаю как было: сворачиваю, прячу в трей или кладу на старое место."""
+    if hwnd == _user32.GetForegroundWindow() or _topmost(hwnd):
+        yield
+        return
+    iconic, visible = _user32.IsIconic(hwnd), _user32.IsWindowVisible(hwnd)
+    above = None if iconic or not visible else _above(hwnd)
+    if iconic or not visible:
+        _user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
+    _user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, _KEEP)
+    _nudge(hwnd)
+    try:
+        yield
+    finally:
+        time.sleep(0.2)                       # нажатие должно дойти до страницы, пока она ещё видна
+        _user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, _KEEP)
+        if iconic:
+            _user32.ShowWindow(hwnd, SW_SHOWMINNOACTIVE)
+        elif not visible:
+            _user32.ShowWindow(hwnd, SW_HIDE)
+        elif above:
+            _user32.SetWindowPos(hwnd, above, 0, 0, 0, 0, _KEEP)
+
+
+def _find_buttons(hwnd: int, names: tuple[str, ...], timeout: float) -> list | None:
+    """Кнопки окна hwnd в порядке дерева, как только среди них появится одна из names.
+    None - нужной кнопки так и не появилось."""
     import comtypes.client
 
     ua = _uia()
-    pids = {p.pid for p in _find_procs({e.lower() for e in exes}, set())}
-    windows = _windows_of(pids) if pids else []
-    if not windows:
-        return None
     uia = comtypes.client.CreateObject(ua.CUIAutomation, interface=ua.IUIAutomation)
-    root = uia.ElementFromHandle(windows[0][0])
+    root = uia.ElementFromHandle(hwnd)
     condition = uia.CreatePropertyCondition(ua.UIA_ControlTypePropertyId, ua.UIA_ButtonControlTypeId)
     deadline = time.time() + timeout
     while True:
@@ -74,28 +142,36 @@ def _find_buttons(exes: set[str], names: tuple[str, ...], timeout: float) -> lis
 
 def _press(exes: set[str], names: tuple[str, ...], timeout: float) -> str | None:
     ua = _uia()
-    buttons = dict(reversed(_find_buttons(exes, names, timeout) or []))    # первая кнопка с таким именем
-    for name in names:
-        if name in buttons:
-            pattern = buttons[name].GetCurrentPattern(ua.UIA_InvokePatternId)
-            pattern.QueryInterface(ua.IUIAutomationInvokePattern).Invoke()
-            return name
+    hwnd = _main_window(exes)
+    if hwnd is None:
+        return None
+    with _shown(hwnd):
+        buttons = dict(reversed(_find_buttons(hwnd, names, timeout) or []))    # первая кнопка с таким именем
+        for name in names:
+            if name in buttons:
+                pattern = buttons[name].GetCurrentPattern(ua.UIA_InvokePatternId)
+                pattern.QueryInterface(ua.IUIAutomationInvokePattern).Invoke()
+                return name
     return None
 
 
 def _toggle(exes: set[str], name: str, state: bool, timeout: float) -> bool | None:
     ua = _uia()
-    buttons = [element for n, element in _find_buttons(exes, (name,), timeout) or [] if n == name]
-    if not buttons:
+    hwnd = _main_window(exes)
+    if hwnd is None:
         return None
-    # Такая же кнопка бывает и в списке треков на странице; панель плеера в дереве идёт последней
-    toggle = buttons[-1].GetCurrentPattern(ua.UIA_TogglePatternId).QueryInterface(ua.IUIAutomationTogglePattern)
-    if bool(toggle.CurrentToggleState) == state:
-        return False
-    toggle.Toggle()
-    time.sleep(0.3)
-    log("Кнопки", f"«{name}»: {'вкл' if toggle.CurrentToggleState else 'выкл'} после нажатия")
-    return True
+    with _shown(hwnd):
+        buttons = [element for n, element in _find_buttons(hwnd, (name,), timeout) or [] if n == name]
+        if not buttons:
+            return None
+        # Такая же кнопка бывает и в списке треков на странице; панель плеера в дереве идёт последней
+        toggle = buttons[-1].GetCurrentPattern(ua.UIA_TogglePatternId).QueryInterface(ua.IUIAutomationTogglePattern)
+        if bool(toggle.CurrentToggleState) == state:
+            return False
+        toggle.Toggle()
+        time.sleep(0.3)
+        log("Кнопки", f"«{name}»: {'вкл' if toggle.CurrentToggleState else 'выкл'} после нажатия")
+        return True
 
 
 def _with_com(fn, *args):

@@ -777,3 +777,61 @@ def test_play_closes_sound_after_phrase(monkeypatch):
 ])
 def test_joke_mood_phrase(text, joke):
     assert bool(util.R["joke"].search(text)) is joke
+
+
+# лайк в свёрнутой Яндекс Музыке
+
+class _FakeWindows:
+    """Окна для uia._shown: что Харви делает с окном Яндекс Музыки (1), пока ищет в нём кнопку."""
+    def __init__(self, foreground=2, iconic=False, visible=True, topmost=False, above=77):
+        self.foreground, self.iconic, self.visible, self.topmost, self.above = foreground, iconic, visible, topmost, above
+        self.calls = []
+
+    def GetForegroundWindow(self):
+        return self.foreground
+
+    def IsIconic(self, hwnd):
+        return self.iconic
+
+    def IsWindowVisible(self, hwnd):
+        return self.visible if hwnd == 1 else True
+
+    def GetWindowLongW(self, hwnd, index):
+        return 0x8 if self.topmost and hwnd == 1 else 0
+
+    def GetWindow(self, hwnd, cmd):
+        return self.above if hwnd == 1 else None
+
+    def GetWindowRect(self, hwnd, rect):
+        pass
+
+    def ShowWindow(self, hwnd, cmd):
+        self.calls.append(("show", cmd))
+
+    def SetWindowPos(self, hwnd, after, *args):
+        import ctypes
+        if after is None:
+            self.calls.append("move")
+        else:                                  # HWND_TOPMOST = -1, HWND_NOTOPMOST = -2, иначе окно-сосед
+            self.calls.append(("place", ctypes.c_ssize_t(getattr(after, "value", after)).value))
+
+
+@pytest.mark.parametrize("state,before,after", [
+    # свёрнута: разворачиваю без активации, «поверх всех», потом сворачиваю обратно
+    ({"iconic": True}, [("show", 4), ("place", -1), "move", "move"], [("place", -2), ("show", 7)]),
+    # развёрнута, но под другими окнами (из лога 9 октября): потом - на старое место, под окно 77
+    ({}, [("place", -1), "move", "move"], [("place", -2), ("place", 77)]),
+    # спрятана в трей: показываю и прячу обратно
+    ({"visible": False}, [("show", 4), ("place", -1), "move", "move"], [("place", -2), ("show", 0)]),
+    # активна или уже «поверх всех» - не трогаю
+    ({"foreground": 1}, [], []),
+    ({"topmost": True}, [], []),
+])
+def test_music_window_is_shown_for_buttons_and_put_back(monkeypatch, state, before, after):
+    from core import uia
+    fake = _FakeWindows(**state)
+    monkeypatch.setattr(uia, "_user32", fake)
+    monkeypatch.setattr(uia.time, "sleep", lambda sec: None)
+    with uia._shown(1):
+        assert fake.calls == before
+    assert fake.calls == before + after
