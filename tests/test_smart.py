@@ -48,6 +48,12 @@ def route(text: str):
     ("переведи это на немецкий", "selection:translate"),
     ("переведи на английский и вставь", "selection:translate"),
     ("переведи на английский и ставь текст", "selection:translate"),     # так Whisper слышит «вставь»
+    ("переведи фразу на русский", "selection:translate"),        # из лога 9 октября: переводило слово «фразу»
+    ("как переводится выделенная фраза", "selection:translate"), # из лога: уходило в ИИ без выделенного текста
+    ("как переводится это", "selection:translate"),
+    ("переведи эту фразу", "selection:translate"),
+    ("переведи слово кошка на немецкий", "translate"),          # своё слово - перевожу его, а не выделенное
+    ("как перевести кошку на английский", "translate"),
     ("перескажи выделенное", "selection:summary"),
     ("исправь ошибки в выделенном", "selection:fix"),
     ("исправь ошибки", "selection:fix"),
@@ -90,6 +96,8 @@ def test_commands_win_over_questions():
     ("как сказать я тебя люблю по-английски", ("я тебя люблю", "английский")),
     ("а как по-немецки спасибо", ("спасибо", "немецкий")),
     ("переведи спасибо на французский", ("спасибо", "французский")),
+    ("переведи спасибо на немецкий", ("спасибо", "немецкий")),         # «-цкий» раньше не узнавался
+    ("как будет кошка на турецком", ("кошка", "турецкий")),
     ("скажи по-английски доброе утро", ("доброе утро", "английский")),
     ("как по-русски thank you", ("thank you", "русский")),
     ("как по-человечески сказать что я занят", None),
@@ -183,6 +191,27 @@ def test_translation_replaces_selection(monkeypatch):
     phrase, _ = smart.on_selection("translate", "переведи на английский", None)
     assert pasted == ["Hello, world"] and not spoken
     assert not phrase.startswith((smart.INFO, smart.FAIL))        # тихий режим: только звук «готово»
+
+
+@pytest.mark.parametrize("low,selected,spoken,pasted", [
+    ("переведи выделенное", "audio callback", True, False),       # чужой текст - перевод вслух, код не трогаю
+    ("переведи на русский", "Hallo, wie geht es dir?", True, False),
+    ("переведи на русский и вставь", "Hallo", False, True),        # попросили вставить - вставляю
+    ("переведи выделенное", "Привет", False, True),                # русский текст - на английский, как раньше
+])
+def test_translation_to_russian_is_spoken(monkeypatch, low, selected, spoken, pasted):
+    said, put = [], []
+    monkeypatch.setattr(smart, "foreground_is_mine", lambda: False)
+    monkeypatch.setattr(smart, "copy_selection", lambda: selected)
+    monkeypatch.setattr(smart, "edit", lambda instruction, text: "перевод")
+    monkeypatch.setattr(smart, "paste_text", put.append)
+    monkeypatch.setattr(smart, "_speak_answer",
+                        lambda messages, num_predict=150, num_ctx=None: said.append(messages[-1]["content"]) or (None, "перевод"))
+    monkeypatch.setattr(smart._user32, "GetForegroundWindow", lambda: 1, raising=False)
+    smart.on_selection("translate", low, None)
+    assert bool(said) is spoken and bool(put) is pasted
+    if spoken:
+        assert "на русский" in said[0] and selected in said[0]
 
 
 def test_dictation_model_down(monkeypatch):

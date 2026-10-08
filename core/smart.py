@@ -33,6 +33,7 @@ from phrases import (
     REWRITE_STYLES,
     SCREEN,
     SELECTION_ACTIONS,
+    SELECTION_PASTE,
     SELECTION_THIS,
     SELECTION_WORDS,
     TRANSLATE_ALOUD,
@@ -93,16 +94,19 @@ QUESTION_RE = _rx(QUESTION)
 SCREEN_RE = _rx(SCREEN)
 SELECTION_WORDS_RE = re.compile(SELECTION_WORDS)
 SELECTION_THIS_RE = re.compile(SELECTION_THIS)
+SELECTION_PASTE_RE = re.compile(SELECTION_PASTE)
 SELECTION_ACTION_RES = tuple((name, re.compile(p)) for name, p in SELECTION_ACTIONS.items())
 STYLE_RES = tuple((re.compile(rf"\b(?:{p})"), instruction) for p, instruction in REWRITE_STYLES.items())
 LANG_RES = tuple((re.compile(rf"\b(?:{p})"), lang) for p, lang in TRANSLATE_LANGS.items())
 TRANSLATE_ALOUD_RES = tuple(re.compile(p) for p in TRANSLATE_ALOUD)
 _QUOTE_CHARS = "«»\"“”„'"
 # Что остаётся от "переведи на английский и вставь", если своего текста нет
-# ("ставь" - так Whisper слышит "вставь")
+# ("ставь" - так Whisper слышит "вставь"). «Переведи фразу на русский» - тоже про выделенное:
+# из лога 9 октября - переводило само слово «фразу»
 _BARE_FILLER_RE = re.compile(
     r"\b(?:на|в|во|по|мне|пожалуйста|язык\w*|стил\w*|текст\w*|ошибк\w*|орфографи\w*|грамматик\w*|"
-    r"пунктуаци\w*|и|а|(?:в|по)?став\w*|замени\w*|его|её|ее|это|кратко|коротко|сюда|туда|сразу)\b")
+    r"пунктуаци\w*|и|а|(?:в|по)?став\w*|замени\w*|его|её|ее|это|эту|этот|эти|кратко|коротко|сюда|туда|сразу|"
+    r"фраз\w*|слов[оа]|предложени\w*|абзац\w*)\b")
 # стиль в начале диктовки; Whisper часто ставит после него точку
 _DICTATE_STYLE_RE = re.compile(rf"^(?:в\s+)?(?:{'|'.join(REWRITE_STYLES)})(?:\s+стил\w*)?[\s,.!:;—–-]+(?P<text>.+)$",
                                re.IGNORECASE | re.DOTALL)
@@ -342,8 +346,20 @@ def _replace_selection(text: str) -> None:
                           hwnd=_user32.GetForegroundWindow(), at=time.time())
 
 
+def _say_translation(text: str, num_ctx: int | None) -> Result:
+    """Перевод на русский нужен, чтобы понять чужой текст - строку кода, страницу, подсказку, - поэтому
+    читаю его вслух, а не вставляю: в редакторе перевод затёр бы выделенное. «…и вставь» - вставлю."""
+    messages = [{"role": "system", "content": EDIT_PROMPT},
+                {"role": "user", "content": f"Переведи текст на русский язык.\n\nТекст:\n{text}"}]
+    result = _speak_answer(messages, num_predict=len(text) // 2 + 100, num_ctx=num_ctx)
+    if result[1]:
+        log("Перевод", f"{text[:100]} → {result[1][:200]}")
+    return result
+
+
 def on_selection(action: str, low: str, style: str | None) -> Result:
-    """Ctrl+C -> ИИ. Объяснение читаю вслух, перевод и правки вставляю вместо выделенного."""
+    """Ctrl+C -> ИИ. Объяснение и перевод на русский читаю вслух, другие переводы и правки вставляю
+    вместо выделенного."""
     if foreground_is_mine():
         return f"{FAIL}сначала переключитесь на окно с текстом", ""
     text = copy_selection().strip()
@@ -368,6 +384,8 @@ def on_selection(action: str, low: str, style: str | None) -> Result:
     # перевод и правки встают на место выделенного
     if action == "translate":
         lang = _target_lang(low, text)
+        if lang == "русский" and not SELECTION_PASTE_RE.search(low):
+            return _say_translation(text, num_ctx)
         instruction, done, verb = f"Переведи текст на {lang} язык.", f"перевел{END} текст на {lang}", "перевести"
     elif action == "fix":
         instruction, done, verb = FIX, f"исправил{END} текст", "исправить"
