@@ -265,6 +265,29 @@ def test_is_quick_command(text, quick):
     assert parse.is_quick_command(text) is quick
 
 
+@pytest.mark.parametrize("text,key,matches", [
+    ("да", "yes", True), ("да да", "yes", True), ("да удаляй", "yes", True),     # из лога 8 октября
+    ("да да да", "yes", True), ("ага давай", "yes", True), ("да уверен", "yes", True),
+    ("да я иду мама", "yes", False), ("да я же тебе говорю", "yes", False),  # разговор рядом - не подтверждение
+    ("нет", "no", True), ("нет нет", "no", True), ("нет не надо", "no", True), ("нет я не знаю", "no", False),
+])
+def test_confirm_answer(text, key, matches):
+    assert bool(util.R[key].search(text)) is matches
+
+
+def test_confirm_time_counts_after_question_is_spoken():
+    import time
+
+    from core import daily
+    daily.hold_pending()                                       # ничего не ждём - ничего не ломается
+    daily._pending = {"action": lambda: "ok", "deadline": time.time() + 1}
+    try:
+        daily.hold_pending()                                   # Харви ещё договаривает вопрос
+        assert daily._pending["deadline"] > time.time() + daily.CONFIRM_TIMEOUT - 1
+    finally:
+        daily.clear_pending()
+
+
 def test_quick_without_name_in_dialog_and_yes_when_pending():
     assert parse.is_quick_command("пауза", need_name=False)
     assert parse.is_quick_command("да", need_name=False, pending=True)

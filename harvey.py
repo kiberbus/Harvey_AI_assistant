@@ -71,6 +71,7 @@ from core.apps import (  # noqa: F401
 )
 from core.daily import (  # noqa: F401
     clear_pending,
+    hold_pending,
     set_sleeping,
     start_reminders,
 )
@@ -206,6 +207,8 @@ def main() -> None:
                     elif time.time() > dialog_until:
                         dialog_until = 0.0
                         log("Диалог", "окно закрыто")
+                if _speaking.is_set():
+                    hold_pending()                   # и время на «да/нет» - тоже с момента, когда договорила вопрос
                 # Разбудили (голосом или из трея) - звук, накопленный во сне, уже не нужен
                 if was_sleeping and not daily._sleeping:
                     drain(audio_q)

@@ -145,6 +145,13 @@ def clear_pending() -> None:
     _pending = None
 
 
+def hold_pending() -> None:
+    """Пока Харви задаёт вопрос, время на «да/нет» не идёт. Раньше CONFIRM_TIMEOUT считался с момента
+    вопроса, а сам вопрос звучит ~5 с: «Да, удаляй» через 13 с уже не принималось (из лога 8 октября)."""
+    if _pending is not None:
+        _pending["deadline"] = max(_pending["deadline"], time.time() + CONFIRM_TIMEOUT)
+
+
 def sleep_mode() -> str:
     set_sleeping(True)
     return f"{RAW}Хорошо."             # RAW: говорю ровно эту фразу в любом режиме
