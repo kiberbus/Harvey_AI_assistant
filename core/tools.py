@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Callable
 
 from config import (
@@ -9,18 +10,18 @@ from config import (
     FOLDERS,
     SITES,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     FAIL,
     log,
 )
-from core.audio import (  # noqa: F401
+from core.audio import (
     change_volume,
     mute,
     output_device_info,
     set_output_device,
     set_volume,
 )
-from core.apps import (  # noqa: F401
+from core.apps import (
     alt_tab,
     arrange_window,
     change_brightness,
@@ -42,14 +43,14 @@ from core.apps import (  # noqa: F401
     side_by_side,
     window_state,
 )
-from core.media import (  # noqa: F401
+from core.media import (
     app_volume,
     media,
     now_playing,
     play_app,
     rate_track,
 )
-from core.daily import (  # noqa: F401
+from core.daily import (
     add_note,
     add_reminder,
     cancel_power,
@@ -69,7 +70,7 @@ from core.daily import (  # noqa: F401
     tell_weekday,
     weather,
 )
-from core.tray import (  # noqa: F401
+from core.tray import (
     restart_self,
 )
 from core import browser, calc, files, game, steam, system, uia, undo
@@ -215,11 +216,14 @@ TOOLS = [
                       "description": "Чем управлять; не указывай, если пользователь не уточнил"}},
           ["action"]),
     _tool("now_playing", "Сказать, что сейчас играет: название и исполнителя.", {}, []),
-    _tool("close_tab", "Закрыть вкладку браузера: текущую, соседнюю, все кроме текущей или по названию сайта.",
-          {"which": {"type": "string", "enum": ["current", "previous", "next", "others", "name"]},
-           "name": {"type": "string", "description": "Название сайта или вкладки, если which=name"}}, ["which"]),
-    _tool("switch_tab", "Перейти на открытую вкладку браузера по названию сайта.",
-          {"name": {"type": "string"}}, ["name"]),
+    _tool("close_tab", "Закрыть вкладку браузера: текущую, соседнюю, все кроме текущей, по названию сайта "
+                       "или по номеру слева.",
+          {"which": {"type": "string", "enum": ["current", "previous", "next", "others", "name", "index"]},
+           "name": {"type": "string", "description": "Название сайта или вкладки, если which=name"},
+           "index": {"type": "integer", "description": "Номер вкладки слева, с 1, если which=index"}}, ["which"]),
+    _tool("switch_tab", "Перейти на открытую вкладку браузера: по названию сайта или по номеру слева (index).",
+          {"name": {"type": "string", "description": "Название сайта или вкладки"},
+           "index": {"type": "integer", "description": "Номер вкладки слева, с 1: «вторая вкладка» - 2"}}, []),
     _tool("list_tabs", "Сказать, какие вкладки открыты в браузере.", {}, []),
     _tool("copy_link", "Скопировать в буфер обмена адрес (ссылку) открытой страницы браузера.", {}, []),
     _tool("rate_track", "Лайк текущей песне в Яндекс Музыке (добавить в «Мне нравится»), снять лайк или дизлайк.",
@@ -283,10 +287,32 @@ TOOLS = [
 ]
 
 
+def _fit_args(name: str, fn: Callable[..., str], args: dict) -> dict:
+    """Аргументы, которые функция принимает. ИИ иногда придумывает свои: switch_tab(tab_index=1) падал
+    с TypeError (из лога 7 октября). Похожее имя подставляю (tab_index → index), остальное отбрасываю."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return args
+    if any(p.kind is p.VAR_KEYWORD for p in params.values()):
+        return args
+    fitted = {key: value for key, value in args.items() if key in params}
+    for key, value in args.items():
+        if key in params:
+            continue
+        similar = [p for p in params if p not in fitted and len(p) >= 4 and len(key) >= 4 and (p in key or key in p)]
+        if len(similar) == 1:
+            fitted[similar[0]] = value
+        else:
+            log("Инструмент", f"{name}: нет аргумента {key}={value!r} - пропускаю")
+    return fitted
+
+
 def execute_tool(name: str, args: dict) -> str:
     fn = FUNCTIONS.get(name)
     if fn is None:
         return f"{FAIL}не знаю инструмент {name}"
+    args = _fit_args(name, fn, args)
     try:
         state = undo.before(name, args)          # как было - для «отмени»
         result = fn(**args)

@@ -22,7 +22,7 @@ from config import (
     NUM_CTX,
     QUIET_MODE,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     CALL_RE,
     DIALOG_END_RE,
     DICTATE_RE,
@@ -42,7 +42,7 @@ from core.util import (  # noqa: F401
     find_name,
     log,
 )
-from core.speech import (  # noqa: F401
+from core.speech import (
     play_sound,
     speak,
     speak_stream,
@@ -50,11 +50,10 @@ from core.speech import (  # noqa: F401
     speaking_mood,
     stop_speaking,
 )
-from core.daily import (  # noqa: F401
+from core.daily import (
     clear_pending,
 )
 from core.parse import (
-    click_target,
     fix_hearing,
     parse_all,
     parse_answer,
@@ -122,6 +121,7 @@ def run_llm(user_text: str) -> None:
         if msg.tool_calls:
             _run_tools(msg.tool_calls, user_text)
         elif (msg.content or "").strip():
+            log("Ответ ИИ", msg.content.strip())
             _say(msg.content.strip(), user_text)
         else:
             _reply([not_understood], user_text)
@@ -144,6 +144,7 @@ def run_llm(user_text: str) -> None:
     if not spoken:
         _reply([not_understood], user_text)
         return
+    log("Ответ ИИ", spoken)                         # что именно сказано: без этого ошибку синтеза не разобрать
     _last_reply = spoken
     _remember(user_text, _last_reply)
 
@@ -303,7 +304,7 @@ def handle_command(command: str) -> bool:
         _reply([execute_tool_dictate(smart.prepare_dictation(m.group(1)))], low)
         return True
 
-    if R["exit"].search(low) and not click_target(fix_hearing(low)):    # «нажми выход» - кнопка на экране
+    if R["exit"].search(low):                  # только целой фразой: «нажми выход» - кнопка на экране
         speak_sync("Отключаюсь." if QUIET_MODE else "Слушаюсь, господин. Я отключаюсь.")
         return False
 
@@ -366,5 +367,6 @@ def run_smart(action: Callable[[list[dict]], smart.Result], low: str) -> None:
     if phrase is not None:
         _reply([phrase], low)
     else:
+        log("Ответ ИИ", said)
         _last_reply = said
         _remember(low, said)

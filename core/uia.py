@@ -11,24 +11,23 @@ from __future__ import annotations
 
 import ctypes
 import difflib
-import gc
 import re
 import time
 from contextlib import contextmanager
 from ctypes import wintypes
 
-from core.util import (  # noqa: F401
+from core.util import (
     END,
     FAIL,
     _LATIN,
     _translit,
     log,
 )
-from core.browser import (  # noqa: F401
+from core.browser import (
     _CASE_ENDING_RE,
     _class_of,
 )
-from core.winapi import (  # noqa: F401
+from core.winapi import (
     GW_OWNER,
     GWL_EXSTYLE,
     SWP_NOACTIVATE,
@@ -38,6 +37,7 @@ from core.winapi import (  # noqa: F401
     _find_procs,
     _user32,
     _windows_of,
+    com_call,
 )
 
 
@@ -175,21 +175,12 @@ def _toggle(exes: set[str], name: str, state: bool, timeout: float) -> bool | No
 
 
 def _with_com(fn, *args):
-    """COM открывается и закрывается здесь же, а объекты освобождаются раньше - иначе падение в _ctypes."""
-    import comtypes
-
-    comtypes.CoInitialize()
+    """UI Automation в своём COM (winapi.com_call). Ошибка - значит, кнопки нет: None."""
     try:
-        return fn(*args)
+        return com_call(fn, *args)
     except Exception as e:
         log("Кнопки", f"UI Automation не сработал: {e}")
         return None
-    finally:
-        gc.collect()                          # объекты из fn уже не нужны - освобождаем до выхода из COM
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
 
 
 def press_button(exes: set[str], names: tuple[str, ...], timeout: float = 3.0) -> str | None:

@@ -42,7 +42,7 @@ from phrases import (
     WIKI_NOT_SUBJECT,
 )
 from core import llm
-from core.util import (  # noqa: F401
+from core.util import (
     END,
     FAIL,
     INFO,
@@ -51,19 +51,19 @@ from core.util import (  # noqa: F401
     _rx,
     log,
 )
-from core.daily import (  # noqa: F401
+from core.daily import (
     _http_json,
 )
-from core.apps import (  # noqa: F401
+from core.apps import (
     foreground_is_mine,
     last_dictation,
 )
-from core.speech import (  # noqa: F401
+from core.speech import (
     speak_foreign,
     speak_stream,
     warm_foreign,
 )
-from core.winapi import (  # noqa: F401
+from core.winapi import (
     _user32,
     copy_selection,
     foreground_rect,

@@ -13,7 +13,6 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")   # до импорта to
 import faulthandler
 import logging
 import numpy as np
-import os
 import queue
 import re
 import sounddevice as sd
@@ -37,7 +36,7 @@ from config import (
     WAKE_BEEP,
     WAKE_THRESHOLD,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     DIALOG_END_RE,
     END,
     PUNCT,
@@ -49,10 +48,10 @@ from core.util import (  # noqa: F401
     log,
     setup_logging,
 )
-from core.audio import (  # noqa: F401
+from core.audio import (
     _ducker,
 )
-from core.speech import (  # noqa: F401
+from core.speech import (
     _chimes,
     _ensure_tts,
     _play_worker,
@@ -66,16 +65,16 @@ from core.speech import (  # noqa: F401
     stop_speaking,
     wait_silence,
 )
-from core.apps import (  # noqa: F401
+from core.apps import (
     _load_start_apps,
 )
-from core.daily import (  # noqa: F401
+from core.daily import (
     clear_pending,
     hold_pending,
     set_sleeping,
     start_reminders,
 )
-from core.stt import (  # noqa: F401
+from core.stt import (
     collect_name_sample,
     LAG_KEEP_BLOCKS,
     MAX_LAG_BLOCKS,
@@ -95,12 +94,12 @@ from core.stt import (  # noqa: F401
     too_long_to_wake,
     transcribe,
 )
-from core.tray import (  # noqa: F401
+from core.tray import (
     _quit_event,
     _single_instance,
     start_tray,
 )
-from core.commands import (  # noqa: F401
+from core.commands import (
     _reply,
     _say,
     _warmup_llm,
@@ -115,6 +114,7 @@ import core.game as game
 import core.stt as stt
 import core.system as system
 import core.tray as tray
+
 
 def main() -> None:
     if sys.platform != "win32":
@@ -372,10 +372,14 @@ def main() -> None:
             except Exception:
                 pass
 
+
 if __name__ == "__main__":
     main()
     # Обычный выход при выгрузке CUDA падает с 0xc0000409. Всё нужное уже сделано в main(),
-    # поэтому выхожу сразу через os._exit.
+    # поэтому выхожу сразу через os._exit. faulthandler выключаю раньше: при выгрузке DLL Windows
+    # бросает внутренние исключения COM (0x80010108), и каждый выход дописывал в crash.log ~80 строк
+    # стеков, за которыми терялись настоящие падения
+    faulthandler.disable()
     logging.shutdown()
     sys.stdout.flush()
     os._exit(0)

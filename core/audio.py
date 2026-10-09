@@ -16,7 +16,7 @@ from config import (
     FADE_STEPS,
     NO_VOLUME_CONTROL,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     AudioUtilities,
     CLSCTX_ALL,
     DEVICE_STATE,
@@ -202,8 +202,9 @@ def set_volume(level: int) -> str:
 
 
 def change_volume(delta: int) -> str:
+    delta = int(float(delta))                   # от ИИ может прийти и строка «10»
     current = round(_endpoint_volume().GetMasterVolumeLevelScalar() * 100)
-    new = _clamp(current + int(float(delta)))
+    new = _clamp(current + delta)
     set_volume(new)
     return f"{'прибавил' if delta > 0 else 'убавил'}{END} громкость до {new} процентов"
 

@@ -19,17 +19,17 @@ from config import (
     WAKE_COLLECT,
     WAKE_SAMPLES_DIR,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     log,
 )
-from core.winapi import (  # noqa: F401
+from core.winapi import (
     _kernel32,
 )
-from core.speech import (  # noqa: F401
+from core.speech import (
     _speaking,
     play_sound,
 )
-from core.daily import (  # noqa: F401
+from core.daily import (
     open_notes,
     set_sleeping,
 )

@@ -12,7 +12,7 @@ from ctypes import wintypes
 from config import (
     FEMALE_VOICE,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     AudioUtilities,
     CLSCTX_ALL,
     END,
@@ -24,7 +24,7 @@ from core.util import (  # noqa: F401
     log,
     psutil,
 )
-from core.winapi import (  # noqa: F401
+from core.winapi import (
     KEYEVENTF_KEYUP,
     _force_foreground,
     _top_windows,

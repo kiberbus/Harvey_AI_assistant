@@ -24,6 +24,7 @@ from phrases import (
     CAL_AGENDA,
     CAL_COLORS,
     CAL_DAY,
+    CAL_DAY_ADJECTIVES,
     CAL_EVENT_ADD,
     CAL_EVENT_DELETE,
     CAL_NEXT,
@@ -57,8 +58,11 @@ from phrases import (
     SCENE_VERBS,
     SIDE_BY_SIDE,
     TAB_CLOSE_NAMED,
+    TAB_CLOSE_NUMBER,
     TAB_CONTEXT_NEXT,
     TAB_CONTEXT_PREV,
+    TAB_NUMBER,
+    TAB_ORDINALS,
     TAB_SWITCH_NAMED,
     TAB_SWITCH_SITE,
     TASK_ADD,
@@ -69,7 +73,7 @@ from phrases import (
     WINDOW_PLACE,
     YT,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     ACTIVE_CLOSE_RE,
     APP_ALIASES,
     APP_VOLUME_DOWN_RE,
@@ -108,19 +112,19 @@ from core.util import (  # noqa: F401
     find_name,
     parse_number,
 )
-from core.apps import (  # noqa: F401
+from core.apps import (
     exact_app,
     find_app,
 )
-from core.daily import (  # noqa: F401
+from core.daily import (
     parse_duration,
 )
-from core import browser, calc, files, steam, system  # noqa: F401
+from core import browser, calc, files, steam, system
 from core import tools
-from core.audio import (  # noqa: F401
+from core.audio import (
     device_alias,
 )
-from core.uia import (  # noqa: F401
+from core.uia import (
     MISSED,
 )
 
@@ -998,7 +1002,8 @@ def parse_calendar(low: str) -> Callable[[], str] | None:
         return task
     m = _CAL_EVENT_DELETE_RE.match(low)
     if m:
-        info = _cal_when(m.group("rest"))
+        day = CAL_DAY_ADJECTIVES.get(m.group("adj") or "", "")      # «завтрашнюю встречу» - встречу завтра
+        info = _cal_when(f"{day} {m.group('rest')}")
         title = _strip_words(info["rest"], ("и", "а", "мою", "эту"), ("на", "в", "во", "и", "а"))
         when = _cal_moment(info) or ""
         return lambda: tools.execute_tool("calendar_delete", {"title": title, "when": when})
@@ -1015,14 +1020,24 @@ TAB_SWITCH_NAMED_RE = re.compile(TAB_SWITCH_NAMED)
 TAB_SWITCH_SITE_RE = re.compile(TAB_SWITCH_SITE)
 TAB_CONTEXT_NEXT_RE = re.compile(TAB_CONTEXT_NEXT)
 TAB_CONTEXT_PREV_RE = re.compile(TAB_CONTEXT_PREV)
+TAB_NUMBER_RE = re.compile(TAB_NUMBER)
+TAB_CLOSE_NUMBER_RE = re.compile(TAB_CLOSE_NUMBER)
 FORWARD_OR_NEXT_RE = re.compile(FORWARD_OR_NEXT)
 _NOT_TAB_NAME = re.compile(r"^(?:эт\w+|текущ\w+|активн\w+|все|всё|остальн\w+|други\w+|перв\w+|последн\w+|"
-                           r"следующ\w+|предыдущ\w+|прошл\w+|нов\w+|закрыт\w+|лев\w+|прав\w+)\b"
+                           r"следующ\w+|предыдущ\w+|прошл\w+|нов\w+|закрыт\w+|лев\w+|прав\w+|"
+                           r"(?:" + "|".join(TAB_ORDINALS) + r")\w+)\b"      # «закрой вторую вкладку» - не название
                            r"|,|\b(?:и|а|потом|затем)\b")      # «закрой вкладку и открой ютуб» - это две команды
 
 
 def _tab(tool: str, args: dict) -> Callable[[], str]:
     return lambda: tools.execute_tool(tool, args)
+
+
+def _tab_number(m: re.Match) -> int:
+    """Номер вкладки из TAB_NUMBER / TAB_CLOSE_NUMBER: «вторую» → 2, «номер 4» → 4."""
+    if m.group("ord"):
+        return next(n for stem, n in TAB_ORDINALS.items() if re.match(stem, m.group("ord")))
+    return parse_number(m.group("num"))
 
 
 def parse_browser(seg: str) -> Callable[[], str] | None:
@@ -1055,6 +1070,12 @@ def parse_browser(seg: str) -> Callable[[], str] | None:
         return _tab("list_tabs", {})
     if R["copy_link"].search(seg):
         return _tab("copy_link", {})
+    m = TAB_NUMBER_RE.match(seg)
+    if m:
+        return _tab("switch_tab", {"index": _tab_number(m)})
+    m = TAB_CLOSE_NUMBER_RE.match(seg)
+    if m:
+        return _tab("close_tab", {"which": "index", "index": _tab_number(m)})
     m = TAB_CLOSE_NAMED_RE.match(seg)
     if m:
         name = (m.group("name") or m.group("name2") or "").strip(PUNCT)

@@ -12,7 +12,7 @@ import re
 import time
 from pathlib import Path
 
-from core.util import (  # noqa: F401
+from core.util import (
     END,
     FAIL,
     log,

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import difflib
+import functools
 import threading
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
@@ -22,7 +23,7 @@ from config import (
     GCAL_TASKLIST_ID,
     GCAL_TOKEN_FILE,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     END,
     FAIL,
     INFO,
@@ -100,6 +101,7 @@ def _service(name: str):
 
 def _google(fn: Callable[..., str]) -> Callable[..., str]:
     """Понятные ответы вместо исключений: нет ключа, нет библиотек, нет интернета."""
+    @functools.wraps(fn)                         # tools._fit_args видит настоящие аргументы fn
     def wrapper(*args, **kwargs) -> str:
         try:
             return fn(*args, **kwargs)
@@ -115,8 +117,6 @@ def _google(fn: Callable[..., str]) -> Callable[..., str]:
                 GCAL_TOKEN_FILE.unlink(missing_ok=True)
                 return f"{FAIL}нужно заново войти в Google, повторите команду"
             return f"{FAIL}не удалось связаться с Google Календарём"
-    wrapper.__name__ = fn.__name__
-    wrapper.__doc__ = fn.__doc__
     return wrapper
 
 

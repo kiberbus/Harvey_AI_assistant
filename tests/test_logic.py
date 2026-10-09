@@ -1,6 +1,7 @@
 """Логика без микрофона: ответы, обращение, числа, напоминания, классификация плееров, целостность файлов."""
 
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -849,3 +850,74 @@ def test_music_window_is_shown_for_buttons_and_put_back(monkeypatch, state, befo
     with uia._shown(1):
         assert fake.calls == before
     assert fake.calls == before + after
+
+
+# из лога 7-9 октября: выход, аргументы от ИИ, смайлик в ответе, «закрой и открой», вкладки по номеру
+
+@pytest.mark.parametrize("text,exits", [
+    ("выключись", True), ("выключись, пожалуйста", True), ("всё, выход", True), ("заверши работу", True),
+    ("как найти выход из ситуации", False), ("нажми выход", False), ("заверши работу компьютера", False),
+])
+def test_exit_only_whole_phrase(text, exits):
+    """Раньше слово «выход» в любом месте фразы выключало Харви."""
+    assert bool(util.R["exit"].search(text)) is exits
+
+
+def test_tool_gets_only_its_arguments(monkeypatch):
+    """ИИ звал switch_tab(tab_index=1): TypeError и «не смогла выполнить». Похожее имя подставляю, лишнее - нет."""
+    got = []
+    monkeypatch.setitem(tools.FUNCTIONS, "fake_tab", lambda name="", index=0: got.append((name, index)) or "ок")
+    assert tools.execute_tool("fake_tab", {"tab_index": 2, "color": "red"}) == "ок"
+    assert got == [("", 2)]
+
+
+def test_silero_skips_text_without_letters(monkeypatch):
+    """9 октября: смайлик отдельным предложением ронял Silero пустым ValueError («Ошибка синтеза: »)."""
+    said = []
+
+    class Audio:
+        def detach(self):
+            return self
+
+        def cpu(self):
+            return self
+
+        def numpy(self):
+            return speech.np.zeros(10, dtype="float32")
+
+    class Model:
+        def apply_tts(self, **kwargs):
+            said.append(kwargs.get("text") or kwargs.get("ssml_text"))
+            return Audio()
+
+    monkeypatch.setattr(speech, "_silero_model", Model())
+    assert speech._synthesize_silero("🙂") is None and speech._synthesize_silero("...") is None and not said
+    assert speech._synthesize_silero("Привет 🙂") is not None and len(said) == 1
+
+
+def test_reopen_waits_until_closing_app_exits(monkeypatch):
+    """«Закрой Telegram и открой его» показывало окно, которое тут же закрывалось: жду конца процесса."""
+    from core import apps
+    checks = []
+    monkeypatch.setattr(apps, "_find_procs", lambda exes, skip: checks.append(1) or (["telegram"] if len(checks) < 3 else []))
+    monkeypatch.setattr(apps, "_closing", {"telegram.exe": time.time() + 5})
+    apps._wait_closed({"telegram.exe"})
+    assert len(checks) == 3
+    apps._wait_closed({"notepad.exe"})                 # его не закрывали - не жду и процессы не перебираю
+    assert len(checks) == 3
+
+
+def test_switch_and_close_tab_by_number(monkeypatch):
+    from types import SimpleNamespace
+    from core import browser
+    done = []
+    tabs = [SimpleNamespace(title=t, hwnd=1, select=lambda t=t: done.append(("select", t)),
+                            close=lambda t=t: done.append(("close", t))) for t in ("Почта", "YouTube", "GitHub")]
+    monkeypatch.setattr(browser, "_with_tabs", lambda act: act([(1, tabs)]))
+    monkeypatch.setattr(browser, "_force_foreground", lambda hwnd: None)
+    monkeypatch.setattr(browser, "_user32", SimpleNamespace(IsIconic=lambda hwnd: False))
+    monkeypatch.setattr(browser, "mark_tab_action", lambda: None)
+    assert browser.switch_tab(index=2) == f"переключил{util.END} на «YouTube»"
+    assert browser.close_tab("index", index=3) == f"закрыл{util.END} вкладку «GitHub»"
+    assert done == [("select", "YouTube"), ("close", "GitHub")]
+    assert browser.switch_tab(index=5).startswith(I)

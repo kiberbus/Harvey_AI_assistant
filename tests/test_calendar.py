@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core import gcal, parse, util
+from core import gcal, util
 
 I, F, R = util.INFO, util.FAIL, util.RAW
 TODAY = date.today()
@@ -102,6 +102,9 @@ def test_next_event(run, phrase):
     ("удали встречу с врачом", {"title": "с врачом", "when": ""}),
     ("отмени встречу завтра в 15", {"title": "", "when": _on(TOMORROW, 15)}),
     ("отмени созвон в пятницу", {"title": "", "when": _next_weekday(4).isoformat()}),
+    # из лога 8 октября - уходили в ИИ
+    ("удали сегодняшнюю встречу, работа", {"title": "работа", "when": TODAY.isoformat()}),
+    ("можешь удалить завтрашнюю встречу", {"title": "", "when": TOMORROW.isoformat()}),
 ])
 def test_event_delete(run, phrase, args):
     assert run(phrase) == [("calendar_delete", args)]

@@ -8,11 +8,11 @@ import os
 import queue
 import re
 import sounddevice as sd
+import subprocess
+import sys
 import threading
 import time
 from collections import Counter, deque
-import subprocess
-import sys
 from pathlib import Path
 from typing import Callable
 
@@ -45,10 +45,9 @@ from config import (
     WHISPER_MODEL_SIZE,
     WHISPER_PROMPT,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     HALLUCINATIONS,
     PUNCT,
-    WAKE_PATTERN,
     log,
 )
 

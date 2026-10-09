@@ -127,3 +127,13 @@ def test_pasted_text_undone_in_same_window(monkeypatch, keys):
     assert undo.undo("text") == f"убрал{undo.END} вставленный текст"
     assert keys == ["undo"]
     assert undo._stack == undo.deque(maxlen=undo.UNDO_DEPTH)
+
+
+def test_closed_tabs_reopen(monkeypatch, keys):
+    """«Закрой остальные вкладки» - «отмени»: раньше отмена не знала close_tab и жала Ctrl+Z."""
+    monkeypatch.setitem(tools.FUNCTIONS, "close_tab",
+                        lambda which="current", name="", index=0: "закрыла 3 вкладки, осталась «Почта»")
+    monkeypatch.setattr(system, "press_chords", lambda action: keys.append(action) or "ок")
+    tools.execute_tool("close_tab", {"which": "others"})
+    undo.undo()
+    assert keys == ["reopen_tab"] * 3

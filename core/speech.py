@@ -32,7 +32,7 @@ from config import (
     TTS_MOODS,
     TTS_SPEED,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     PIPER_DIR,
     PIPER_MODEL,
     PiperVoice,
@@ -41,7 +41,7 @@ from core.util import (  # noqa: F401
     log,
     normalize_for_tts,
 )
-from core.audio import (  # noqa: F401
+from core.audio import (
     _ducker,
 )
 
@@ -287,10 +287,17 @@ def _split_sentences(text: str, limit: int = 300) -> list[str]:
     return chunks
 
 
+# Буква или цифра. На куске без них («🙂», «...», «—») Silero падает с пустым ValueError: так ИИ отвечал
+# смайликом отдельным предложением, и в лог шло «Ошибка синтеза: » (9 октября)
+_SPEAKABLE_RE = re.compile(r"[^\W_]")
+
+
 def _synthesize_silero(text: str, mood: str | None = None) -> tuple[np.ndarray, int] | None:
     pieces: list[np.ndarray] = []
     with _piper_lock:
         for chunk in _split_sentences(normalize_for_tts(text)):
+            if not _SPEAKABLE_RE.search(chunk):
+                continue
             kwargs = dict(speaker=SILERO_SPEAKER, sample_rate=SILERO_SAMPLE_RATE)
             ssml = _silero_ssml(chunk, mood)
             for attempt in (dict(ssml_text=ssml, put_accent=True, put_yo=True),
@@ -315,6 +322,8 @@ def _synthesize_foreign(lang: str, text: str) -> tuple[np.ndarray, int] | None:
     pieces: list[np.ndarray] = []
     with _piper_lock:
         for chunk in _split_sentences(text):
+            if not _SPEAKABLE_RE.search(chunk):
+                continue
             audio = model.apply_tts(text=chunk, speaker=SILERO_FOREIGN[lang][1], sample_rate=SILERO_SAMPLE_RATE)
             pieces.append(audio.detach().cpu().numpy().astype("float32"))
     return (np.concatenate(pieces), SILERO_SAMPLE_RATE) if pieces else None
@@ -517,7 +526,7 @@ def _synth_worker() -> None:
                 else:
                     log("TTS", "Голосовая модель не загружена")
             except Exception as e:
-                log("TTS", f"Ошибка синтеза: {e}")
+                log("TTS", f"Ошибка синтеза «{payload[:60]}»: {type(e).__name__} {e}")
         if audio is not None and gen == _tts_gen:
             _play_queue.put((audio, gen))
         else:
@@ -573,7 +582,7 @@ def stop_speaking() -> None:
 def speak(text: str, mood: str | None = None) -> None:
     """Говорит в фоне, управление возвращается сразу. mood - ключ TTS_MOODS («urgent», «joke»)."""
     text = address(text)
-    if not text:
+    if not _SPEAKABLE_RE.search(text):
         return
     print(f"\n{ASSISTANT_NAME}: {text}", flush=True)
     if threading.current_thread() is threading.main_thread():

@@ -24,7 +24,7 @@ from config import (
 from phrases import (
     CURRENCY_SPOKEN,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     END,
     FAIL,
     INFO,
@@ -33,7 +33,7 @@ from core.util import (  # noqa: F401
     log,
     parse_number,
 )
-from core.speech import (  # noqa: F401
+from core.speech import (
     play_sound,
     speak,
 )

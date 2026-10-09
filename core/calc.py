@@ -21,7 +21,7 @@ from phrases import (
     CURRENCY_WORDS,
     UNITS,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     FAIL,
     INFO,
     _TENS,

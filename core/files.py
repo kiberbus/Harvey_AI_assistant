@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import ctypes
 import difflib
-import gc
 import os
 import re
 import shutil
@@ -25,22 +24,23 @@ from config import (
 from phrases import (
     FOLDER_ALIASES,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     END,
     FAIL,
     INFO,
     _plural,
     log,
 )
-from core.winapi import (  # noqa: F401
+from core.winapi import (
     SW_RESTORE,
     WM_CLOSE,
     _force_foreground,
     _top_windows,
     _user32,
+    com_call,
     window_class,
 )
-from core.daily import (  # noqa: F401
+from core.daily import (
     ask_confirm,
 )
 from core import steam, system
@@ -78,19 +78,13 @@ class _Place:
 
 
 def _with_shell(fn, *args):
-    """fn(shell, *args) внутри своего COM, как в core/uia.py: объекты освобождаю до выхода из COM."""
-    import comtypes
-    import comtypes.client
+    """fn(shell, *args) с Shell.Application внутри своего COM (winapi.com_call)."""
+    def run():
+        import comtypes.client
 
-    comtypes.CoInitialize()
-    try:
         return fn(comtypes.client.CreateObject("Shell.Application", dynamic=True), *args)
-    finally:
-        gc.collect()
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
+
+    return com_call(run)
 
 
 def _explorer_windows() -> list[tuple[int, str]]:

@@ -3,13 +3,36 @@
 from __future__ import annotations
 
 import ctypes
+import gc
 import sys
 import time
 from ctypes import wintypes
 
-from core.util import (  # noqa: F401
+from core.util import (
     psutil,
 )
+
+
+def com_call(fn, *args):
+    """fn(*args) внутри своего COM: команду выполняют и главный поток, и фоновые. Объекты из fn
+    освобождаю до CoUninitialize - отпущенный после него объект ронял процесс в _ctypes (access violation).
+    Поэтому и у исключения убираю стек: он держал бы кадр fn с объектами до выхода из COM."""
+    import comtypes
+
+    error: Exception | None = None
+    comtypes.CoInitialize()
+    try:
+        return fn(*args)
+    except Exception as e:
+        error = e.with_traceback(None)
+        error.__context__ = error.__cause__ = None
+    finally:
+        gc.collect()
+        try:
+            comtypes.CoUninitialize()
+        except Exception:
+            pass
+    raise error
 
 
 VK_MEDIA_NEXT, VK_MEDIA_PREV, VK_MEDIA_PLAY_PAUSE = 0xB0, 0xB1, 0xB3

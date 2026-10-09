@@ -29,7 +29,7 @@ from config import (
 from phrases import (
     SITE_ALIASES,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     END,
     FAIL,
     INFO,
@@ -41,21 +41,19 @@ from core.util import (  # noqa: F401
     log,
     psutil,
 )
-from core.winapi import (  # noqa: F401
+from core.winapi import (
     GW_OWNER,
     GWL_EXSTYLE,
     KEYEVENTF_KEYUP,
     SW_MAXIMIZE,
     SW_MINIMIZE,
     SW_RESTORE,
-    VK_CONTROL,
     VK_D,
     VK_LWIN,
     VK_MENU,
     VK_SNAPSHOT,
     VK_TAB,
     WM_CLOSE,
-    WNDENUMPROC,
     WS_EX_TOOLWINDOW,
     _find_procs,
     _force_foreground,
@@ -63,6 +61,7 @@ from core.winapi import (  # noqa: F401
     _user32,
     _windows_of,
     bring_to_front,
+    com_call,
     foreground_title,
     half,
     is_cloaked,
@@ -72,11 +71,11 @@ from core.winapi import (  # noqa: F401
     type_text,
     window_area,
 )
-from core.speech import (  # noqa: F401
+from core.speech import (
     play_sound,
     speak,
 )
-from core.daily import (  # noqa: F401
+from core.daily import (
     ask_confirm,
 )
 from core import browser, files, steam
@@ -93,9 +92,10 @@ def set_brightness(level: int) -> str:
 def change_brightness(delta: int) -> str:
     import screen_brightness_control as sbc
 
+    delta = int(float(delta))                   # от ИИ может прийти и строка «10»
     current = sbc.get_brightness()
     current = current[0] if isinstance(current, list) else current
-    new = _clamp(current + int(float(delta)))
+    new = _clamp(current + delta)
     sbc.set_brightness(new)
     return f"{'повысил' if delta > 0 else 'понизил'}{END} яркость до {new} процентов"
 
@@ -208,7 +208,9 @@ def open_app(name: str) -> str:
 
     # Если уже запущено - не запускаю второй экземпляр, а показываю окно
     try:
-        state = bring_to_front(_target_exes(name))
+        exes = _target_exes(name)
+        _wait_closed(exes)
+        state = bring_to_front(exes)
     except Exception as e:
         log("Окно", f"не удалось развернуть: {e}")
         state = None
@@ -269,12 +271,10 @@ RECENT_DIR = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Re
 
 
 def _lnk_targets(links: list[Path]) -> list[str]:
-    """Куда ведут ярлыки. COM открываю здесь же: команду могут выполнить и не из главного потока."""
-    import comtypes
-    import comtypes.client
+    """Куда ведут ярлыки (WScript.Shell в своём COM: команду могут выполнить и не из главного потока)."""
+    def read() -> list[str]:
+        import comtypes.client
 
-    comtypes.CoInitialize()
-    try:
         shell = comtypes.client.CreateObject("WScript.Shell", dynamic=True)
         targets = []
         for lnk in links:
@@ -282,13 +282,9 @@ def _lnk_targets(links: list[Path]) -> list[str]:
                 targets.append(shell.CreateShortcut(str(lnk)).TargetPath or "")
             except Exception:
                 targets.append("")
-        del shell
         return targets
-    finally:
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
+
+    return com_call(read)
 
 
 def open_recent(show_all: bool = False) -> str:
@@ -388,6 +384,16 @@ def _taskkill(pids: list[int], force: bool = False, wait: bool = True) -> None:
 
 CLOSE_QUICK_WAIT = 0.3     # сколько жду нормального закрытия до ответа
 CLOSE_GRACE = 1.5          # сколько даю закрыться самому, потом завершаю принудительно
+_closing: dict[str, float] = {}     # процесс → до какого времени он ещё может закрываться в фоне
+
+
+def _wait_closed(exes: set[str]) -> None:
+    """«Закрой телеграм и открой его»: закрытие доделывается в фоне, и окно уходящего процесса ещё есть -
+    open_app показывал его («показала Telegram»), а потом Telegram закрывался (из лога 9 октября).
+    Жду, пока закрываемый процесс завершится, и запускаю заново."""
+    deadline = max((_closing.get(exe, 0.0) for exe in exes), default=0.0)
+    while time.time() < deadline and _find_procs(exes, set()):
+        time.sleep(0.1)
 
 
 def _report_late_failure(text: str) -> None:
@@ -426,6 +432,7 @@ def _close_exes(targets: set[str], label: str) -> str:
         return f"{FAIL}«{label}» не запущено"
 
     _taskkill([p.pid for p in procs], wait=False)
+    _closing.update(dict.fromkeys(targets, time.time() + CLOSE_GRACE + 1.5))
     try:
         _, alive = psutil.wait_procs(procs, timeout=CLOSE_QUICK_WAIT)
     except psutil.AccessDenied:          # из лога: диспетчер задач запущен от администратора

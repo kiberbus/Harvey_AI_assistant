@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import threading
 import time
@@ -16,14 +17,14 @@ from config import (
     UNDO_DEPTH,
     UNDO_TTL,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     END,
     FAIL,
     INFO,
     RAW,
     log,
 )
-from core.winapi import (  # noqa: F401
+from core.winapi import (
     _force_foreground,
     _user32,
     foreground_title,
@@ -32,7 +33,7 @@ from core.winapi import (  # noqa: F401
 
 @dataclass
 class Entry:
-    kind: str                       # volume, brightness, close, text
+    kind: str                       # volume, brightness, close, text, delete
     what: str                       # для лога: на что отвечает отмена
     revert: Callable[[], str]
     at: float
@@ -133,6 +134,9 @@ def _revert_for(name: str, args: dict, state, result: str) -> tuple[str, Callabl
         return "close", lambda: _reopen_window(state)
     if name == "shortcut" and args.get("action") == "close_tab":
         return "close", _reopen_tab
+    if name == "close_tab":       # «закрой вкладку» идёт сюда, а не в Ctrl+W: «отмени» было Ctrl+Z
+        many = re.search(r"(\d+) вклад", result)       # «закрыла 3 вкладки, осталась …»
+        return "close", lambda: _reopen_tab(int(many.group(1)) if many else 1)
     if (name == "shortcut" and args.get("action") in TEXT_SHORTCUTS) or name == "dictate":
         hwnd = _user32.GetForegroundWindow()
         return "text", lambda: _undo_text(hwnd)
@@ -153,9 +157,16 @@ def _restore_brightness(level: int) -> str:
     return f"вернул{END} яркость {level} процентов"
 
 
-def _reopen_tab() -> str:
+def _reopen_tab(times: int = 1) -> str:
+    """Ctrl+Shift+T столько раз, сколько вкладок закрыли."""
     from core import system
-    return system.shortcut("reopen_tab")
+    result = system.shortcut("reopen_tab")
+    for _ in range(times - 1):
+        if result.startswith(FAIL):
+            break
+        time.sleep(0.15)
+        system.press_chords("reopen_tab")
+    return result if times == 1 or result.startswith(FAIL) else f"вернул{END} закрытые вкладки: {times}"
 
 
 def _reopen_closed(name: str, result: str) -> Callable[[], str]:
@@ -199,27 +210,14 @@ def _active_window_info() -> dict | None:
 
 
 def _explorer_folder(hwnd: int) -> str | None:
-    """Путь папки в окне проводника - через Shell.Application."""
-    import comtypes
-    import comtypes.client
+    """Путь папки в окне проводника - через Shell.Application. Раньше COM закрывался, пока объекты окон
+    были ещё живы (их отпускали уже после CoUninitialize), - теперь через files._with_shell."""
+    from core import files
 
-    comtypes.CoInitialize()
-    try:
-        shell = comtypes.client.CreateObject("Shell.Application", dynamic=True)
-        windows = shell.Windows()
-        for i in range(windows.Count):
-            w = windows.Item(i)
-            try:
-                if w is not None and int(w.HWND) == hwnd:
-                    return str(w.Document.Folder.Self.Path)
-            except Exception:
-                continue
-        return None
-    finally:
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
+    def find(shell) -> str | None:
+        return next((tab.path for tab in files._tabs(shell) if tab.hwnd == hwnd), None)
+
+    return files._with_shell(find)
 
 
 def _reopen_window(info: dict) -> str:

@@ -220,6 +220,7 @@ SITES = {
     "stepik": "https://stepik.org",
     "calendar": "https://calendar.google.com",
     "mail": "https://mail.google.com",
+    "gemini": "https://gemini.google.com",
 }
 
 _HOME = os.path.expanduser("~")

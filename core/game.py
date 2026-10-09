@@ -21,12 +21,12 @@ from config import (
     KEEP_ALIVE,
     VIDEO_APPS,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     END,
     log,
     psutil,
 )
-from core.winapi import (  # noqa: F401
+from core.winapi import (
     foreground_fullscreen,
 )
 from core import llm

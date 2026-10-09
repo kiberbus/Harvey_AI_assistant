@@ -422,6 +422,22 @@ PHRASE_CASES = [
     ("закрой все приложения", [("request_close_all", {})]),
     ("разве не браузер", [("open_app", {"name": "браузер"})]),             # «разверни браузер»
     ("там, не знаю, запусти яндекс музыку", [("play_app", {"name": "яндекс музыка"})]),
+
+    # из лога за 7-9 октября: уходили в ИИ
+    ("вторая вкладка", [("switch_tab", {"index": 2})]),                  # ИИ звал switch_tab(tab_index=1)
+    ("вторая кладка", [("switch_tab", {"index": 2})]),
+    ("перейди на третью вкладку", [("switch_tab", {"index": 3})]),
+    ("вкладка номер 4", [("switch_tab", {"index": 4})]),
+    ("закрой вторую вкладку", [("close_tab", {"which": "index", "index": 2})]),   # не close_app «вторую вкладку»
+    ("вкладка с youtube", [("switch_tab", {"name": "youtube"})]),
+    ("вкладку назад", [("shortcut", {"action": "prev_tab"})]),            # не вкладка с названием «назад»
+    ("музыка стопа", [(M, {"action": "pause", "target": "music"})]),
+    ("сверние – активное окно", [("window_state", {"action": "minimize"})]),
+    ("создаю папку урок 4", [("create_file", {"ext": "", "name": "урок 4"})]),
+    ("открой gemini", [("open_browser", {"site": "gemini"})]),
+    ("открой оbs", [("open_app", {"name": "obs"})]),                      # «о» - русская буква
+    ("плаузер", [("open_browser", {})]),
+    ("перезагрузить", [("request_power", {"action": "restart"})]),     # всё равно спросит «да/нет»
 ]
 
 
@@ -476,7 +492,8 @@ def test_no_tab_context_means_track(run):
     assert run("предыдущая") == [("media", {"action": "previous", "target": None})]
 
 
-@pytest.mark.parametrize("phrase", ["теле... ничего не закрывай", "забудь", "ой, не то", "ладно, проехали"])
+@pytest.mark.parametrize("phrase", ["теле... ничего не закрывай", "забудь", "ой, не то", "ладно, проехали",
+                                    "открой, забей", "не, ничего, забей"])      # последние два - из лога
 def test_cancel_does_nothing(calls, monkeypatch, phrase):
     """Передумали на полуслове - ничего не выполняем, только звук отмены."""
     from core import commands

@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import ctypes
-import gc
 import re
 import time
 import urllib.parse
@@ -23,7 +22,7 @@ from config import (
 from phrases import (
     SITE_ALIASES,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     END,
     FAIL,
     INFO,
@@ -31,12 +30,13 @@ from core.util import (  # noqa: F401
     log,
     psutil,
 )
-from core.winapi import (  # noqa: F401
+from core.winapi import (
     SW_RESTORE,
     _find_procs,
     _force_foreground,
     _user32,
     _windows_of,
+    com_call,
 )
 
 TAB_CONTEXT_SECONDS = 30      # столько после «следующая вкладка» голое «следующая» тоже про вкладки
@@ -155,26 +155,20 @@ def _with_tabs(fn):
 
 
 def _with_uia(fn):
-    """Вызывает fn(uia, ua) внутри своего COM, как core/uia.py: иначе падение в _ctypes."""
-    import comtypes
-    import comtypes.client
+    """Вызывает fn(uia, ua) внутри своего COM (winapi.com_call). Ошибка - None."""
+    def run():
+        import comtypes.client
 
-    comtypes.CoInitialize()
-    try:
         comtypes.client.GetModule("UIAutomationCore.dll")
         from comtypes.gen import UIAutomationClient as ua
 
-        uia = comtypes.client.CreateObject(ua.CUIAutomation, interface=ua.IUIAutomation)
-        return fn(uia, ua)
+        return fn(comtypes.client.CreateObject(ua.CUIAutomation, interface=ua.IUIAutomation), ua)
+
+    try:
+        return com_call(run)
     except Exception as e:
         log("Вкладки", f"UI Automation не сработал: {e}")
         return None
-    finally:
-        gc.collect()
-        try:
-            comtypes.CoUninitialize()
-        except Exception:
-            pass
 
 
 # Падежное окончание русского слова: «с google календарем» → «google календар» есть в «Google Календарь»
@@ -206,11 +200,13 @@ def _tabs_word(n: int) -> str:
     return f"{n} {_plural(n, 'вкладку', 'вкладки', 'вкладок')}"
 
 
-def close_tab(which: str = "current", name: str = "") -> str:
-    """Закрывает вкладку: current, previous, next, others (все, кроме текущей) или по названию (name).
-    Кнопкой «Закрыть» на самой вкладке, поэтому фокус и клавиатура не нужны."""
+def close_tab(which: str = "current", name: str = "", index: int = 0) -> str:
+    """Закрывает вкладку: current, previous, next, others (все, кроме текущей), по названию (name)
+    или по номеру слева (index, «закрой вторую вкладку»). Кнопкой «Закрыть» на самой вкладке,
+    поэтому фокус и клавиатура не нужны."""
     which = (which or "current").strip().lower()
     words = _keywords(name) if name else set()
+    number = int(index or 0)
 
     def act(windows):
         if not windows:
@@ -226,6 +222,11 @@ def close_tab(which: str = "current", name: str = "") -> str:
         _, tabs = windows[0]                              # верхнее окно браузера
         if not tabs:
             return None
+        if number:
+            if not 1 <= number <= len(tabs):
+                return f"{INFO}открыто вкладок: {len(tabs)}"
+            tabs[number - 1].close()
+            return f"закрыл{END} вкладку {_short(tabs[number - 1].title)}"
         current = next((i for i, t in enumerate(tabs) if t.selected), None)
         if current is None:
             return None
@@ -252,27 +253,60 @@ def close_tab(which: str = "current", name: str = "") -> str:
     return result if result is not None else f"{FAIL}не вижу вкладки браузера"
 
 
-def switch_tab(name: str) -> str:
-    """«Перейди на вкладку ютуб»: выбирает вкладку по названию и выводит её окно вперёд."""
+def _show_tab(tab: _Tab) -> str:
+    tab.select()
+    if _user32.IsIconic(tab.hwnd):
+        _user32.ShowWindow(tab.hwnd, SW_RESTORE)
+    _force_foreground(tab.hwnd)
+    mark_tab_action()
+    return f"переключил{END} на {_short(tab.title)}"
+
+
+def switch_tab(name: str = "", index: int = 0) -> str:
+    """«Перейди на вкладку ютуб» - по названию, «вторая вкладка» - по номеру (index с единицы).
+    Выбирает вкладку и выводит её окно вперёд."""
+    if index:
+        return _switch_to_number(int(index))
+    if not (name or "").strip():
+        return f"{FAIL}скажите, на какую вкладку перейти"
     words = _keywords(name)
 
     def act(windows):
         if not windows:
             return f"{FAIL}браузер не открыт"
         found = next((t for _, tabs in windows for t in tabs if _matches(t, words)), None)
-        if found is None:
-            return ""
-        found.select()
-        if _user32.IsIconic(found.hwnd):
-            _user32.ShowWindow(found.hwnd, SW_RESTORE)
-        _force_foreground(found.hwnd)
-        mark_tab_action()
-        return f"переключил{END} на {_short(found.title)}"
+        return _show_tab(found) if found is not None else ""
 
     result = _with_tabs(act)
     if result == "":
         return f"{INFO}вкладки «{name}» нет"
     return result if result is not None else f"{FAIL}не вижу вкладки браузера"
+
+
+def _switch_to_number(number: int) -> str:
+    """«Вторая вкладка», «перейди на третью вкладку» - по порядку в верхнем окне браузера, как Ctrl+2.
+    Из лога 7 октября: ИИ звал switch_tab(tab_index=1), такого аргумента не было, и переход падал."""
+    def act(windows):
+        if not windows:
+            return f"{FAIL}браузер не открыт"
+        _, tabs = windows[0]
+        if not tabs:
+            return None
+        if not 1 <= number <= len(tabs):
+            return f"{INFO}открыто вкладок: {len(tabs)}"
+        return _show_tab(tabs[number - 1])
+
+    result = _with_tabs(act)
+    if result is not None:
+        return result
+    if not 1 <= number <= 8:                              # Ctrl+9 - последняя вкладка, а не девятая
+        return f"{FAIL}не вижу вкладки браузера"
+    if not focus_browser():                               # UI Automation не видит вкладки - Ctrl+номер
+        return f"{FAIL}браузер не открыт"
+    from core import system
+    system._chord(system.CTRL, ord(str(number)))
+    mark_tab_action()
+    return f"переключил{END} на вкладку {number}"
 
 
 def list_tabs() -> str:

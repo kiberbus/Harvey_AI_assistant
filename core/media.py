@@ -21,7 +21,7 @@ from config import (
     MUSIC_SITES,
     VIDEO_APPS,
 )
-from core.util import (  # noqa: F401
+from core.util import (
     END,
     FAIL,
     HAS_PYCAW,
@@ -30,7 +30,7 @@ from core.util import (  # noqa: F401
     log,
     psutil,
 )
-from core.winapi import (  # noqa: F401
+from core.winapi import (
     VK_MEDIA_NEXT,
     VK_MEDIA_PLAY_PAUSE,
     VK_MEDIA_PREV,
@@ -41,7 +41,7 @@ from core.winapi import (  # noqa: F401
     press_key,
 )
 from core.uia import press_button, toggle_button
-from core.audio import (  # noqa: F401
+from core.audio import (
     _audio_sessions,
     _ducker,
     _foreign,
@@ -49,7 +49,7 @@ from core.audio import (  # noqa: F401
     _session_peak,
     audio_is_playing,
 )
-from core.apps import (  # noqa: F401
+from core.apps import (
     _target_exes,
     open_app,
     open_browser,
@@ -98,6 +98,8 @@ def _smtc_run(coro, timeout: float = 20.0):
             ready.wait()
             _smtc_loop = loop
     return asyncio.run_coroutine_threadsafe(coro, _smtc_loop).result(timeout)
+
+
 _MUSIC_SITES_RE = re.compile(MUSIC_SITES, re.IGNORECASE)
 _TARGET_NAMES = {"music": "музыка", "youtube": "ютуб", "video": "видео"}
 _paused_by_me: list[tuple[str, str]] = []     # (приложение, название) - что Харви поставила на паузу последним

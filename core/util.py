@@ -59,10 +59,10 @@ try:
 except Exception:  # psutil ставится вместе с pycaw
     psutil = None
 
-try:
-    from comtypes import CLSCTX_ALL
-    from pycaw.constants import DEVICE_STATE, EDataFlow, ERole
-    from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume, IAudioMeterInformation
+try:    # импортирую здесь один раз, а пользуются audio.py и system.py
+    from comtypes import CLSCTX_ALL  # noqa: F401
+    from pycaw.constants import DEVICE_STATE, EDataFlow, ERole  # noqa: F401
+    from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume, IAudioMeterInformation  # noqa: F401
 
     HAS_PYCAW = True
 except Exception:  # pycaw не установлен - громкость и приглушение будут недоступны
