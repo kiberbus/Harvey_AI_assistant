@@ -346,6 +346,14 @@ def add_reminder(at: float, text: str = "") -> str:
     return f"{INFO}напомню {_when_words(at)}" + (f": {text.strip()}" if text.strip() else "")
 
 
+def remind(when: str, text: str = "") -> str:
+    """Напоминание для ИИ: время строкой «ГГГГ-ММ-ДДTЧЧ:ММ». add_reminder ждёт unix-время - его модель не посчитает."""
+    moment = datetime.fromisoformat(str(when).strip())
+    if moment <= datetime.now():
+        return f"{FAIL}это время уже прошло"
+    return add_reminder(moment.timestamp(), text)
+
+
 def list_reminders() -> str:
     with _reminders_lock:
         items = list(_reminders)

@@ -232,8 +232,10 @@ def test_target_lang(low, text, lang):
 
 
 def test_long_text_gets_bigger_context():
+    from config import NUM_CTX
     assert smart._ctx_for("коротко") is None
-    assert smart._ctx_for("а" * 3000) >= 2500
+    assert smart._ctx_for("а" * 3000) is None                  # помещается - модель не перезагружается
+    assert smart._ctx_for("а" * 15000) > NUM_CTX
 
 
 def _fake_wiki(monkeypatch, pages: dict, search: list[str] | None = None):

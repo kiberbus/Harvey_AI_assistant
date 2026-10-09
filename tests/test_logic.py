@@ -921,3 +921,24 @@ def test_switch_and_close_tab_by_number(monkeypatch):
     assert browser.close_tab("index", index=3) == f"закрыл{util.END} вкладку «GitHub»"
     assert done == [("select", "YouTube"), ("close", "GitHub")]
     assert browser.switch_tab(index=5).startswith(I)
+
+
+def test_tools_fit_into_model_context():
+    """При NUM_CTX = 2048 Ollama обрезала подсказку с инструментами (4.2 тыс. токенов) до 1 тыс., и ИИ видел
+    четверть инструментов: «включи погромче музыку» вызывало undo. ~4 символа кириллицы на токен (замер
+    9 октября), считаю по 3.5 - с запасом; ещё 1500 токенов - на историю диалога и ответ."""
+    import json
+    from config import NUM_CTX
+    chars = len(json.dumps(tools.TOOLS, ensure_ascii=False)) + len(commands.SYSTEM_PROMPT) + 100
+    assert chars / 3.5 + 1500 < NUM_CTX
+
+
+def test_remind_for_llm_takes_time_as_text(monkeypatch):
+    from datetime import timedelta
+    from core import daily
+    added = []
+    monkeypatch.setattr(daily, "add_reminder", lambda at, text="": added.append((at, text)) or "ок")
+    later = datetime.now().replace(second=0, microsecond=0) + timedelta(days=1)
+    assert daily.remind(later.strftime("%Y-%m-%dT%H:%M"), "позвонить маме") == "ок"
+    assert added == [(later.timestamp(), "позвонить маме")]
+    assert daily.remind("2020-01-01T10:00").startswith(F)

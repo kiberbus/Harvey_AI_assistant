@@ -6,9 +6,13 @@ import inspect
 from typing import Callable
 
 from config import (
+    CURRENCY_HOME_NAME,
     FEMALE_VOICE,
     FOLDERS,
     SITES,
+)
+from phrases import (
+    CURRENCY_SPOKEN,
 )
 from core.util import (
     FAIL,
@@ -61,6 +65,7 @@ from core.daily import (
     list_reminders,
     open_notes,
     read_notes,
+    remind,
     request_power,
     set_timer,
     sleep_mode,
@@ -125,6 +130,7 @@ FUNCTIONS: dict[str, Callable[..., str]] = {
     "app_volume": app_volume,
     "play_app": play_app,
     "add_reminder": add_reminder,
+    "remind": remind,                                  # то же для ИИ: время строкой, а не unix-временем
     "list_reminders": list_reminders,
     "cancel_reminders": cancel_reminders,
     "set_brightness": set_brightness,
@@ -263,6 +269,26 @@ TOOLS = [
                   "закрытое окно, убрать вставленный текст, вернуть удалённое из корзины. "
                   "Без kind - самое последнее, иначе Ctrl+Z.",
           {"kind": {"type": "string", "enum": ["volume", "brightness", "close", "text", "delete"]}}, []),
+    _tool("show_desktop", "Свернуть все окна (показать рабочий стол).", {}, []),
+    _tool("restore_windows", "Развернуть обратно все свёрнутые окна.", {}, []),
+    _tool("window_state", "Свернуть или развернуть на весь экран активное окно.",
+          {"action": {"type": "string", "enum": ["minimize", "maximize"]}}, ["action"]),
+    _tool("screenshot", "Сделать снимок экрана (сохраняется в «Изображения»).", {}, []),
+    _tool("lock_pc", "Заблокировать компьютер.", {}, []),
+    _tool("request_power", "Выключить, перезагрузить компьютер или перевести его в сон (спросит подтверждение).",
+          {"action": {"type": "string", "enum": ["shutdown", "restart", "sleep"]}}, ["action"]),
+    _tool("cancel_power", "Отменить запланированное выключение или перезагрузку.", {}, []),
+    _tool("set_timer", "Поставить таймер.", {"seconds": {"type": "integer", "description": "Длительность в секундах"}},
+          ["seconds"]),
+    _tool("cancel_timers", "Отменить все таймеры.", {}, []),
+    _tool("remind", "Напомнить в указанное время.",
+          {"when": {"type": "string", "description": "ГГГГ-ММ-ДДTЧЧ:ММ"},
+           "text": {"type": "string", "description": "О чём напомнить"}}, ["when"]),
+    _tool("add_note", "Записать заметку в файл заметок.", {"text": {"type": "string"}}, ["text"]),
+    _tool("weather", "Погода сейчас и на сегодня.", {}, []),
+    _tool("currency_rate", f"Курс валют: сколько они стоят в {CURRENCY_HOME_NAME}.",
+          {"codes": {"type": "array", "items": {"type": "string", "enum": list(CURRENCY_SPOKEN)},
+                     "description": "Коды валют: USD, EUR, RUB…"}}, ["codes"]),
     _tool("system_status", "Загрузка процессора и оперативной памяти.", {}, []),
     _tool("gpu_status", "Температура и загрузка видеокарты.", {}, []),
     _tool("microphone", "Включить (true) или выключить (false) микрофон.", {"state": {"type": "boolean"}}, ["state"]),

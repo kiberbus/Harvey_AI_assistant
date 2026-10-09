@@ -14,12 +14,9 @@ from config import (
     ASSISTANT_NAME,
     DIALOG_LOCAL_ONLY,
     DIALOG_MAX_WORDS,
-    KEEP_ALIVE,
     LLM_STREAM,
     MEMORY_TTL,
     MEMORY_TURNS,
-    MODEL,
-    NUM_CTX,
     QUIET_MODE,
 )
 from core.util import (
@@ -100,20 +97,21 @@ _WEEKDAYS = ("понедельник", "вторник", "среда", "четв
 
 
 def _today_line() -> str:
-    """Без даты модель не посчитает «в пятницу» для календаря."""
+    """Без даты модель не посчитает «в пятницу» для календаря. Только дата, без часов и минут: тогда
+    подсказка с инструментами весь день одна и та же, и Ollama берёт её из кеша, а не считает заново."""
     now = datetime.now()
-    return f"Сейчас {now:%Y-%m-%d %H:%M}, {_WEEKDAYS[now.weekday()]}.\n"
+    return f"Сегодня {now:%Y-%m-%d}, {_WEEKDAYS[now.weekday()]}.\n"
+
+
+def _system_message() -> dict:
+    return {"role": "system", "content": SYSTEM_PROMPT + _today_line()}
 
 
 def run_llm(user_text: str) -> None:
     """Один запрос к модели. Инструменты выполняю сам и ответ собираю кодом, обычный текст
     озвучиваю по предложениям прямо во время генерации."""
     global _last_reply
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT + _today_line()},
-        *_history_messages(),
-        {"role": "user", "content": user_text},
-    ]
+    messages = [_system_message(), *_history_messages(), {"role": "user", "content": user_text}]
     not_understood = f"{FAIL}не понял{END} команду"
 
     if not LLM_STREAM:
@@ -150,7 +148,8 @@ def run_llm(user_text: str) -> None:
 
 
 def _warmup_llm(wait_sec: float = 180.0) -> None:
-    """Прогреваю модель заранее, чтобы первая команда не ждала холодного старта.
+    """Прогреваю модель заранее, чтобы первая команда не ждала холодного старта, - вместе с подсказкой
+    и инструментами: Ollama запомнит их, и первая команда не будет считать 5 тыс. токенов заново.
     При входе в Windows Харви и Ollama стартуют одновременно, поэтому жду, пока Ollama поднимется."""
     if game.active():                              # 4-5 ГБ видеопамяти нужнее игре
         log("LLM", "идёт игра - модель не прогреваю.")
@@ -159,8 +158,8 @@ def _warmup_llm(wait_sec: float = 180.0) -> None:
     waited = False
     while True:
         try:
-            ollama.chat(model=MODEL, messages=[{"role": "user", "content": "ок"}],
-                        options={"num_predict": 1, "num_ctx": NUM_CTX}, keep_alive=KEEP_ALIVE)
+            # те же параметры, что у команд (llm.chat): иначе Ollama перезагрузит модель или не узнает подсказку
+            llm.chat([_system_message(), {"role": "user", "content": "ок"}], tools=TOOLS, num_predict=1)
             log("LLM", "модель прогрета." + (" (дождалась запуска Ollama)" if waited else ""))
             return
         except ollama.ResponseError as e:          # Ollama ответил ошибкой (например, нет модели)
