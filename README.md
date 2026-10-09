@@ -8,7 +8,7 @@
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows&logoColor=white)
 ![Whisper](https://img.shields.io/badge/STT-faster--whisper-412991)
 ![Ollama](https://img.shields.io/badge/LLM-Ollama%20·%20Gemma-000000?logo=ollama&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-348%20passed-brightgreen?logo=pytest&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-873%20passed-brightgreen?logo=pytest&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 [English](#english) · [Русский](#русский)
@@ -22,8 +22,8 @@
 ## English
 
 Harvey is a Russian-speaking voice assistant for Windows 11 that works completely offline. It waits for
-its name, transcribes speech with faster-whisper, and runs about 50 system actions: apps, media players,
-volume, windows, timers, reminders, calculations and more. Most commands are handled by a fast rule-based
+its name, transcribes speech with faster-whisper, and runs about 80 system actions: apps, browser tabs, media players,
+volume, windows, files, timers, reminders, calculations and more. Most commands are handled by a fast rule-based
 parser in about a millisecond. Only phrases the rules don't understand go to a local LLM (Ollama + Gemma)
 with tool calling. Replies are spoken with Silero or Piper TTS. Nothing leaves the machine.
 
@@ -34,7 +34,10 @@ with tool calling. Replies are spoken with Silero or Piper TTS. Nothing leaves t
 | 🚀 **Apps and sites** | "open Telegram", "close the browser and Yandex Music", "YouTube cats", "find a borscht recipe" |
 | 🎵 **Media** | "music stop", "pause YouTube", "next track", "what's playing", "unpause" |
 | 🔊 **Sound and screen** | "volume 30", "music quieter", "Telegram to 50", "brighter", "mute" |
-| 🪟 **Windows and keys** | "minimize all", "switch window", "close tab", "take a screenshot", "lock the PC" |
+| 🪟 **Windows and keys** | "minimize all", "Telegram to the left", "Chrome and Telegram side by side", "press ctrl g", "click Subscribe" |
+| 🌐 **Browser tabs** | "close the previous tab", "close the YouTube tab", "second tab", "copy the link" |
+| 📁 **Files** | "create a Python file main", "open the report file", "delete the selected" (to the Recycle Bin after "yes") |
+| ↩️ **Undo** | "undo" returns the volume, reopens what was closed, removes pasted text, restores deleted files |
 | ⏰ **Time and tasks** | "timer for 5 minutes", "remind me at 18:00 to call mom", "note: buy bread", "what's the date" |
 | 📅 **Google Calendar** | "what do I have tomorrow", "add a meeting tomorrow at 3 pm in red", "add task: send the report by Friday", "mark the task done" |
 | 🌦️ **Info** | "what's the weather", "dollar rate", "what is 15% of 2400", "CPU load" |
@@ -122,12 +125,16 @@ core/
   commands.py    routing: notes/dictation → rules → LLM
   tools.py       action registry and tool descriptions for the LLM
   llm.py smart.py      Ollama: commands, questions, text and screenshots
+  browser.py     browser tabs via UI Automation
+  files.py       files in the open Explorer folder
+  undo.py        "undo": stack of reverse actions
+  gcal.py        Google Calendar and Tasks
   stt.py speech.py     Whisper, VAD, openWakeWord; TTS and chimes
   apps.py media.py audio.py system.py daily.py calc.py   the actions themselves
   game.py        game mode: frees video memory while a game is running
   steam.py       Steam library: launch installed games by voice
   winapi.py uia.py tray.py                               ctypes, UI Automation, tray
-tests/           348 tests, < 1 s; no mic, models or PowerShell needed
+tests/           873 tests, ~2 s; no mic, models or PowerShell needed
 ```
 
 ### Tests
@@ -136,7 +143,7 @@ tests/           348 tests, < 1 s; no mic, models or PowerShell needed
 .venv\Scripts\python -m pytest -q
 ```
 
-`tests/test_phrases.py` holds 150 "phrase → expected calls" pairs. Every real-life failure gets a test.
+`tests/test_phrases.py` holds about 400 "phrase → expected calls" pairs. Every real-life failure gets a test.
 
 ### Privacy
 
@@ -151,8 +158,8 @@ on your computer and can be turned off with `LOG_ENABLED`.
 ## Русский
 
 Харви - голосовая помощница для Windows 11, которая работает полностью без интернета. Она ждёт своё имя,
-распознаёт речь через faster-whisper и умеет около 50 действий: приложения, плееры, громкость, окна,
-таймеры, напоминания, вычисления и другое. Большинство команд разбирают правила примерно за миллисекунду.
+распознаёт речь через faster-whisper и умеет около 80 действий: приложения, вкладки браузера, плееры, громкость,
+окна, файлы, таймеры, напоминания, вычисления и другое. Большинство команд разбирают правила примерно за миллисекунду.
 В локальную языковую модель (Ollama + Gemma) с вызовом инструментов уходят только фразы, которые правила
 не поняли. Отвечает голосом через Silero или Piper. Ничего не уходит с компьютера.
 
@@ -163,7 +170,10 @@ on your computer and can be turned off with `LOG_ENABLED`.
 | 🚀 **Приложения и сайты** | «открой телеграм», «закрой браузер и яндекс музыку», «ютуб котики», «найди рецепт борща» |
 | 🎵 **Медиа** | «музыка стоп», «ютуб на паузу», «следующий трек», «что играет», «сними с паузы» |
 | 🔊 **Звук и экран** | «громкость 30», «музыку тише», «телеграм на 50», «ярче», «выключи звук» |
-| 🪟 **Окна и клавиши** | «сверни всё», «переключи окно», «закрой вкладку», «сделай скриншот», «заблокируй компьютер» |
+| 🪟 **Окна и клавиши** | «сверни всё», «телеграм влево», «рядом хром и телеграм», «нажми ctrl g», «нажми подписаться» |
+| 🌐 **Вкладки браузера** | «закрой предыдущую вкладку», «закрой вкладку ютуб», «вторая вкладка», «скопируй ссылку» |
+| 📁 **Файлы** | «создай питон файл main», «открой файл отчёт», «удали выделенное» (в корзину после «да») |
+| ↩️ **Отмена** | «отмени» возвращает громкость, открывает закрытое, убирает вставленный текст, достаёт файл из корзины |
 | ⏰ **Время и дела** | «таймер на 5 минут», «напомни в 18:00 позвонить маме», «запиши: купить хлеб», «какое сегодня число» |
 | 📅 **Google Календарь** | «что у меня завтра», «добавь встречу завтра в 15:00 красным цветом», «добавь задачу сдать отчёт до пятницы», «отметь задачу купить молоко выполненной», «удали встречу с врачом» |
 | 🌦️ **Справки** | «какая погода», «курс доллара», «сколько будет 15% от 2400», «загрузка процессора» |
@@ -233,7 +243,7 @@ ollama pull gemma4:e4b
 .venv\Scripts\python -m pytest -q
 ```
 
-В `tests/test_phrases.py` 150 пар «фраза → ожидаемые вызовы». Каждая неудача из жизни закрепляется
+В `tests/test_phrases.py` около 400 пар «фраза → ожидаемые вызовы». Каждая неудача из жизни закрепляется
 тестом, например «сними с паузы» не должно стать паузой.
 
 ### Приватность
